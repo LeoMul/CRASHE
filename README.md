@@ -1,4 +1,4 @@
-# `CRASHE` - Collisional Radiative modelling for Astrophysics with Homologous Expansion
+# `CRASHE` - Collisional Radiative modelling for AStrophysics with Homologous Expansion
 This is a code for solving collisional radiative problems, with atomic data input through the adf04 standard.  
 Essentially, the equation of motion is something like
 
