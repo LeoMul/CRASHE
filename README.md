@@ -1,5 +1,5 @@
 # `CRASHE` - Collisional Radiative modelling for AStrophysics with Homologous Expansion
-This is a code for solving collisional radiative problems, with atomic data input through the adf04 standard.  
+This is a code for solving collisional radiative problems, with atomic data input through the adf04 standard. Eventually, this will be a python package with compiled fortran doing the numerical work.
 Essentially, the equation of motion is something like
 
 $$
