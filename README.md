@@ -23,7 +23,7 @@ C_{ij} =   \begin{cases}
     \end{cases}
 $$
 
-And the steady state is obtained as the matrix equation $\sum_j C_{ij} n_j = 0$. For $N$ levels in the system, we have $N-1$ equations. Therefore we additionally need to enforce some other condition to have a unique solution. The particle conservation $\sum_j n_j =1$ is adequate. This is typically used in conjunction with the diagonalization of $C_{ij}$, and the selection of the eigenvector with eigenvalue zero. 
+And the steady state is obtained as the matrix equation $\sum_j C_{ij} n_j = 0$. For $N$ levels in the system, we have $N$ equations that are linearly dependent. Therefore we additionally need to enforce some other condition to have a unique solution. The particle conservation $\sum_j n_j =1$ is adequate. This is typically used in conjunction with the diagonalization of $C_{ij}$, and the selection of the eigenvector with eigenvalue zero. 
 
 For an inversion - we choose to write all levels relative to $n_1$, e.g 
 
