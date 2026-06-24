@@ -13,14 +13,14 @@ program mycrm
     call alloc(numwl)
     print*,mode
     if (mode .eq. 'astro') then
-        
-        atomicDensity = getAtomicDensityLocal(massElementSolar ,&
-        atomicNumber,&
-        velocityExpansionC,&
-        0.0_f64,&
-        fractionOverride,&
-        timeSinceExplosionDays,&
-        density)
+
+        call getAtomicDensityLocal(atomicDensity,numions, massElementSolar ,&
+                                    atomicNumber,&
+                                    velocityExpansionC,&
+                                    0.0_f64,&
+                                    fractionOverride,&
+                                    timeSinceExplosionDays,&
+                                    density)
 
         call colrad(temperature,& 
                     density,&
@@ -34,7 +34,8 @@ program mycrm
                     writeoutrates,& 
                     velocityExpansionC,&
                     wavelengthforspectrum,&
-                    broadspec)
+                    broadspec,&
+                    numions, broadmodedefault)
 
     else if (mode .eq. 'levelscan') then 
         call levelscan(temperature,density,careful_la,writeoutrates) 
@@ -44,8 +45,9 @@ program mycrm
         call onion
     else 
         print*, ' Bad calculation mode requested. Check input. '
-    end if 
+    end if
 
+    close(6)
     call dealloc
 
 end program

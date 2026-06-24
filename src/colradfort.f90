@@ -27,7 +27,7 @@ module colradfort
     real(f64), allocatable :: wavelengthforspectrum(:)
     real(f64), allocatable :: broadspec(:)
     !
-    real(f64)              :: atomicDensity
+    real(f64)              :: atomicDensity,numions
     real(f64)              :: sob_damp    = 0.5_f64
     real(f64), parameter   :: sob_tol     = 1.0e-2_f64
     integer,   parameter   :: max_sob_iter = 9999
@@ -38,7 +38,8 @@ module colradfort
     integer                :: atomicNumber
     integer                :: ioncharge_plus
     real(8) :: t1, t2 
-
+    character(len=300)     ::broadmodedefault = 'gaussian'
+        
     contains 
 
     subroutine getadf04(adf04Path,floersHack)
@@ -77,7 +78,9 @@ module colradfort
                       writeoutrates,          &
                       velocityExpansionC,     &
                       wlspec,                 &
-                      bspec                   & 
+                      bspec,                  & 
+                      numIonsLocal,           &
+                      broadmode               &
                       )
        
        real(f64) :: temperature 
@@ -90,10 +93,10 @@ module colradfort
        real(f64) :: wlspec(numwl)
        real(f64) :: bspec(numwl)
        
-       real(f64) :: atomicDensityLocal 
+       real(f64) :: atomicDensityLocal,numIonsLocal
 
        logical :: sobolev,careful_la,writeoutrates
-
+       character(len=300) :: broadmode
 
 
        tempsReq(1) = temperature 
@@ -219,7 +222,7 @@ module colradfort
        close(100)
 
        call cpu_time(t1)
-       call gaussianBroadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,electronDensityLocal,atomicnumber,massElementSolar)
+       call broadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,electronDensityLocal,numIonsLocal,broadmode)
        call cpu_time(t2)
        write(*,'(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2-t1, ' s'
 
@@ -233,7 +236,6 @@ module colradfort
        write(*,'(A,ES10.4,A)') '  [timing] spectrum write      : ', t2-t1, ' s'
 
        close(1)
-       close(6)
 
     end subroutine
         

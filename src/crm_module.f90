@@ -410,16 +410,18 @@ end subroutine solve_cr_populations_axb
 
   end subroutine
 
-  function   getAtomicDensityLocal(ionMassSolar,& 
+    subroutine  getAtomicDensityLocal(denslocal,&
+                                    numIonsLocal,&
+                                   ionMassSolar,& 
                                    atomicnumber,& 
                                    velocity_outer,& 
                                    velocity_inner,& 
                                    fractionOverride,& 
                                    time_exp_days,& 
-                                   electron_density_local) result(dens)
+                                   electron_density_local) 
     implicit none 
-    real(f64) :: dens, ionMassSolar,velocity_outer,velocity_inner,fractionOverride,time_exp_days
-    real(f64)  :: expansion_volume,time_exp_sec,electron_density_local
+    real(f64) :: denslocal, ionMassSolar,velocity_outer,velocity_inner,fractionOverride,time_exp_days
+    real(f64)  :: expansion_volume,time_exp_sec,electron_density_local,numIonsLocal
     integer :: atomicnumber
     real(f64),parameter :: c_cgs = 3e10_f64
 
@@ -428,12 +430,14 @@ end subroutine solve_cr_populations_axb
     !total volume.
     expansion_volume = piFourOnThree * (velocity_outer*c_cgs * time_exp_sec) ** 3
     expansion_volume = expansion_volume - piFourOnThree * (velocity_inner*c_cgs * time_exp_sec) ** 3
+    numIonsLocal = ionMassSolar * m_solar_grams/get_mass_grams(atomicnumber)
 
-    dens = ionMassSolar * m_solar_grams  / (expansion_volume*get_mass_grams(atomicnumber))
+    denslocal =   numIonsLocal / (expansion_volume)
 
-    if (fractionOverride > 0.0_f64) dens = fractionOverride * electron_density_local
-    print*,'number density', dens,'cm-3 from new routine'
-  end function 
+    if (fractionOverride > 0.0_f64) denslocal = fractionOverride * electron_density_local
+    print*,'atomic number density', denslocal,'cm-3 from new routine. edense=', electron_density_local
+    write(0,*) denslocal
+  end subroutine 
     
   subroutine sobolev_escape(nlev,ntran,baseAvals,sobesc,time_exp_days,pops,weights,wl_cm_cubed,atomicDensityLocal)
     !calculates Sobolev escape probability. 
@@ -475,77 +479,200 @@ end subroutine solve_cr_populations_axb
     !
   end subroutine
 
-  subroutine gaussianBroadenedSpectrum(numWavelengths, wavelength,velocityFWHMC, spectra, ntran, pec, spectralLinesCM,electron_density,atomicNumber, ionMassSolar)
+  subroutine broadenedSpectrum(numWavelengths,& 
+                                       wavelength,&
+                                       velocityShell,&
+                                       spectra, &
+                                       ntran, &
+                                       pec, &
+                                       spectralLinesCM,&
+                                       electron_density,&
+                                       numIonsLocal, & 
+                                       calcMode &
+                                       )
     !
-    ! Calculates \sum_i nf * PEC * exp ( -0.5 *  [ (λ - λ_0 ) / σ ]^2)
-    ! where all wavelengths are in nm. the norm factor nf - is 1/nf = 10 sqrt(2pi) σ
-    ! where the extra factor of 10 puts it in units of per angstrom.
-    ! units are annoying. Should probably just keep everything in cgs and ship 
-    ! a post processor with astropy, for my own sanity. 
+    ! Calculates \sum_i nf * PEC * ProfileShape
+    ! For Gaussian: nf = 1 / (sqrt(2pi) σ)
+    ! For Box:      nf = 1 / (2 * Δλ_max)
+    ! Note: An extra factor of (1 / wavelengthCentral) is included in normfactor
+    ! to prepare for the E = hc/λ conversion applied at the end.
     !
-    integer :: numWavelengths
-    integer :: ntran 
-    real(f64) :: wavelength(numWavelengths),electron_density
-    real(f64) :: spectra(numWavelengths)
-    real(f64) :: pec(ntran)
-    real(f64) :: spectralLinesCM(ntran)
-    real(f64) :: ww, wavelengthCentral, ionMassSolar
-    real(f64) :: velocityFWHMC, sig_cm, sigOneOver,num_ions
-    integer :: ii, jj ,atomicNumber
+    implicit none
 
+    character*10, intent(in) :: calcmode
+    integer, intent(in)      :: numWavelengths, ntran 
+    real(f64), intent(in)    :: wavelength(numWavelengths)
+    real(f64), intent(in)    :: velocityShell, electron_density, numIonsLocal
+    real(f64), intent(in)    :: pec(ntran), spectralLinesCM(ntran)
+    real(f64), intent(inout) :: spectra(numWavelengths)
+
+    real(f64) :: ww, wavelengthCentral
+    real(f64) :: sig_cm, sigOneOver
+    integer   :: ii, jj 
 
     real(f64) :: normfactor
-    real(f64) :: thispec,wl_lo,wl_hi, nsigmacut=4,dwl
-    integer :: jlo, jhi 
+    real(f64) :: thispec, wl_lo, wl_hi, dwl
+    real(f64), parameter :: nsigmacut = 4.0_f64
+    integer   :: jlo, jhi 
     real(f64) :: totalpec 
-    real(f64) :: pecthreshold = 1e-4
+    real(f64), parameter :: pecthreshold = 1e-4_f64
     real(f64) :: peccutoff
     real(f64) :: thisphotonenergy 
+
     dwl = wavelength(2) - wavelength(1)
     totalpec = sum(pec)
-
     peccutoff = pecthreshold * totalpec
 
-    ! Calculate Gaussian spectrum
+    ! Calculate spectrum based on the selected mode
     do ii = 1, ntran 
-      !cm
       wavelengthCentral = spectralLinesCM(ii)
 
-      if (wavelengthCentral < 1e-30) cycle
+      if (wavelengthCentral < 1e-30_f64) cycle
 
       thispec = pec(ii)
-
       if (thispec < peccutoff) cycle
 
-      sig_cm = fwhmSigma * wavelengthCentral  * velocityFWHMC
-
-      sigOneOver = 1._f64/sig_cm
-
-      normfactor = sigOneOver * oneOverSQRTTWOPI / wavelengthCentral
-
-      wl_lo = wavelengthCentral - nSigmaCut * sig_cm
-      wl_hi = wavelengthCentral + nSigmaCut * sig_cm
-      jlo = max(1,              nint((wl_lo - wavelength(1)) / dwl) + 1)
-      jhi = min(numWavelengths, nint((wl_hi - wavelength(1)) / dwl) + 1)
       thisphotonenergy = thispec 
+      !write(0,*) 'broad mode ', calcmode,trim(adjustl(calcMode)),trim(adjustl(calcMode))=='box'
 
-      do jj = jlo, jhi
+      ! --- BRANCH: BOX PROFILE (Expanding Shell) ---
+      if ( (calcMode(1:3) == 'box') .or. trim(adjustl(calcMode)) == 'onion') then
+        write(0,*) 'i am doing a box'
+        ! For an expanding shell, max Doppler shift is defined by the shell velocity.
+        ! Assuming velocityShell here represents v/c (or v_expansion / c).
+        wl_lo = wavelengthCentral * (1.0_f64 - velocityShell)
+        wl_hi = wavelengthCentral * (1.0_f64 + velocityShell)
 
-        ww = wavelength(jj) 
-        ww = (ww - wavelengthCentral) 
-        ww = ww * sigOneOver
+        ! Find grid bins
+        jlo = max(1,              nint((wl_lo - wavelength(1)) / dwl) + 1)
+        jhi = min(numWavelengths, nint((wl_hi - wavelength(1)) / dwl) + 1)
 
-        !if (abs(ww) > 5.0) cycle
-        ww = thisphotonenergy * normfactor * exp ( minusHalf * ww * ww  )
-        spectra(jj) = spectra(jj) + ww 
+        ! The box height is 1 / Total Width.
+        ! Extra (1 / wavelengthCentral) applied for E = hc/λ step.
+        normfactor = (1.0_f64 / (wl_hi - wl_lo)) / wavelengthCentral
+        ww = thisphotonenergy * normfactor 
 
-      end do 
+        ! Flat profile: Add uniform intensity to all bins within the box
+        do jj = jlo, jhi
+          spectra(jj) = spectra(jj) + ww 
+        end do
+
+      ! --- BRANCH: GAUSSIAN PROFILE (Thermal/Microturbulence) ---
+      else 
+
+        sig_cm = fwhmSigma * wavelengthCentral * velocityShell
+        sigOneOver = 1.0_f64 / sig_cm
+
+        ! Gaussian normalization.
+        ! Extra (1 / wavelengthCentral) applied for E = hc/λ step.
+        normfactor = sigOneOver * oneOverSQRTTWOPI / wavelengthCentral
+
+        wl_lo = wavelengthCentral - nSigmaCut * sig_cm
+        wl_hi = wavelengthCentral + nSigmaCut * sig_cm
+        
+        jlo = max(1,              nint((wl_lo - wavelength(1)) / dwl) + 1)
+        jhi = min(numWavelengths, nint((wl_hi - wavelength(1)) / dwl) + 1)
+
+        do jj = jlo, jhi
+          ww = wavelength(jj) 
+          ww = (ww - wavelengthCentral) * sigOneOver
+          ww = thisphotonenergy * normfactor * exp ( minusHalf * ww * ww )
+          spectra(jj) = spectra(jj) + ww 
+        end do 
+
+      end if
+
     end do 
-    num_ions = ionMassSolar * m_solar_grams/ get_mass_grams(atomicnumber)
-    print*,'number of ions=',num_ions
-    spectra(:) = spectra(:) * ( num_ions* electron_density * hc_ergcm  * 1e-8) !1e-8 to get in ergs per ang per s
-    !print*,num_ions, maxval(spectra)
+    
+    ! Final scaling: Units conversion (Photons -> Ergs)
+    spectra(:) = spectra(:) * ( numIonsLocal * electron_density * hc_ergcm * 1e-8_f64 ) 
+  
   end subroutine
+
+!  subroutine broadenedSpectrum(numWavelengths,& 
+!                                       wavelength,&
+!                                       velocityShell,&
+!                                       spectra, &
+!                                       ntran, &
+!                                       pec, &
+!                                       spectralLinesCM,&
+!                                       electron_density,&
+!                                       numIonsLocal, & 
+!                                       calcMode &
+!                                       )
+!    !
+!    ! Calculates \sum_i nf * PEC * exp ( -0.5 *  [ (λ - λ_0 ) / σ ]^2)
+!    ! where all wavelengths are in nm. the norm factor nf - is 1/nf = 10 sqrt(2pi) σ
+!    ! where the extra factor of 10 puts it in units of per angstrom.
+!    ! units are annoying. Should probably just keep everything in cgs and ship 
+!    ! a post processor with astropy, for my own sanity. 
+!    !
+!    character* 10 :: calcmode
+!    integer :: numWavelengths
+!    integer :: ntran 
+!    real(f64) :: wavelength(numWavelengths),electron_density
+!    real(f64) :: spectra(numWavelengths)
+!    real(f64) :: pec(ntran)
+!    real(f64) :: spectralLinesCM(ntran)
+!    real(f64) :: ww, wavelengthCentral
+!    real(f64) :: velocityShell, sig_cm, sigOneOver,numIonsLocal
+!    integer :: ii, jj 
+!
+!
+!    real(f64) :: normfactor
+!    real(f64) :: thispec,wl_lo,wl_hi, nsigmacut=4,dwl
+!    integer :: jlo, jhi 
+!    real(f64) :: totalpec 
+!    real(f64) :: pecthreshold = 1e-4
+!    real(f64) :: peccutoff
+!    real(f64) :: thisphotonenergy 
+!    dwl = wavelength(2) - wavelength(1)
+!    totalpec = sum(pec)
+!
+!    peccutoff = pecthreshold * totalpec
+!
+!    !velocityShell = velocityFWHM in the case of a Gaussian model, e.g for a single shell.
+!
+!    ! Calculate Gaussian spectrum
+!    do ii = 1, ntran 
+!      !cm
+!      wavelengthCentral = spectralLinesCM(ii)
+!
+!      if (wavelengthCentral < 1e-30) cycle
+!
+!      thispec = pec(ii)
+!
+!      if (thispec < peccutoff) cycle
+!
+!      sig_cm = fwhmSigma * wavelengthCentral  * velocityShell
+!
+!      sigOneOver = 1._f64/sig_cm
+!
+!      normfactor = sigOneOver * oneOverSQRTTWOPI / wavelengthCentral
+!
+!      wl_lo = wavelengthCentral - nSigmaCut * sig_cm
+!      wl_hi = wavelengthCentral + nSigmaCut * sig_cm
+!      jlo = max(1,              nint((wl_lo - wavelength(1)) / dwl) + 1)
+!      jhi = min(numWavelengths, nint((wl_hi - wavelength(1)) / dwl) + 1)
+!      thisphotonenergy = thispec 
+!
+!      do jj = jlo, jhi
+!
+!        ww = wavelength(jj) 
+!        ww = (ww - wavelengthCentral) 
+!        ww = ww * sigOneOver
+!        ww = thisphotonenergy * normfactor * exp ( minusHalf * ww * ww  )
+!        spectra(jj) = spectra(jj) + ww 
+!
+!      end do 
+!    end do 
+!    
+!    spectra(:) = spectra(:) * ( numIonsLocal * electron_density * hc_ergcm  * 1e-8) !1e-8 to get in ergs per ang per s
+!    
+!    !print*,num_ions, maxval(spectra)
+!
+!  
+!  end subroutine
 
 
 end module crm_module
