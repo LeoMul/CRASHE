@@ -1,0 +1,14 @@
+ &crm_input 
+ temperature            = 3000.0
+ density                = 3000000.0
+ sobolev                = .True.
+ adf04path              ='/Users/leomulholland/CePaper/data/adf045856' 
+ timeSinceExplosionDays = 29.0 
+ velocityExpansionC     = 0.1
+ massElementSolar       = 1.322412e-03
+ fractionOverride       = -1.0
+ wlmin_nm               = 100
+ wlmax_nm               = 7000
+ numwl                  = 2000
+ mode ='astro'
+ &end 

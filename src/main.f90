@@ -1,6 +1,7 @@
 program mycrm
     use input
     use colradfort
+    use onion_module
 
     open(6,file = 'crm.out')
 
@@ -23,11 +24,16 @@ program mycrm
                     wlmax_nm, &
                     numwl , &
                     careful_la, &
-                    writeoutrates)
+                    writeoutrates,& 
+                    wavelengthforspectrum,&
+                    broadspec)
+
     else if (mode .eq. 'levelscan') then 
         call levelscan(temperature,density,careful_la,writeoutrates) 
     else if (mode .eq. 'masscontour') then 
         call masscontour (temperature,density, requiredlumo,careful_la,writeoutrates)
+    else if (mode .eq. 'onion') then 
+        call onion
     else 
         print*, ' Bad calculation mode requested. Check input. '
     end if 

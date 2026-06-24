@@ -19,7 +19,7 @@ FFLAGS      := $(BASE_FFLAGS) $(RELEASE_FLG)
 LDFLAGS     := -llapack -lblas
 
 # --- Files ---
-TARGET      := $(BINDIR)/crm
+TARGET      := $(BINDIR)/crashe
 SRCS        := $(wildcard $(SRCDIR)/*.f90)
 OBJS        := $(SRCS:$(SRCDIR)/%.f90=$(OBJDIR)/%.o)
 
@@ -59,7 +59,16 @@ $(OBJDIR)/crm_module.o:       $(OBJDIR)/types.o \
 
 $(OBJDIR)/colradfort.o:       $(OBJDIR)/crm_module.o
 
-$(OBJDIR)/main.o:             $(OBJDIR)/colradfort.o
+$(OBJDIR)/onion_module.o:     $(OBJDIR)/colradfort.o
+
+
+$(OBJDIR)/main.o:             $(OBJDIR)/colradfort.o\
+                              $(OBJDIR)/onion_module.o
 
 clean:
 	$(RM) $(OBJDIR) $(BINDIR)
+
+.PHONY: test
+
+test: all
+	python3 test.py

@@ -1,0 +1,124 @@
+module onion_module
+    use colradfort 
+    use types 
+    implicit none 
+    contains 
+    subroutine onion 
+        implicit none 
+        ! dummy variables for testing. 
+        integer,parameter   :: numshells = 30 
+        real(f64) :: averageElectronDensity = 3e5 
+        real(f64) :: totalMassMsun = 1e-3 
+        real(f64) :: v_min, v_max, fraction
+        real(f64) :: v_bounds_c(numshells+1)
+        integer   :: i,s 
+        real(f64)   :: shell_v_centers(numShells) ! Shell center velocities (for CRM)
+        real(f64)   :: shell_atomic_density(numShells) 
+        real(f64)   :: shell_electron_density(numShells) 
+        real(f64)   :: shell_mass(numShells) 
+        real(f64)   :: total_rel_vol, shell_rel_vol, total_rel_electrons
+        real(f64)   :: current_avg_ne, scale_ne, total_rel_mass, scale_mass
+        
+        reaL(f64) :: dwl 
+        real(f64) :: wl1 =  1000  
+        real(f64) :: wl2 = 10000 
+        integer,parameter   :: nwl = 1000 
+
+        real(f64) :: currentspec(nwl)
+        real(f64) :: totalspec(nwl)
+        real(f64) :: wlarray(nwl)
+
+        !velocity law:
+        v_min = 0.02_f64
+        v_max = 0.30_f64
+
+        ! Logarithmic spacing ensures high resolution where density is high
+        do i = 1, numShells + 1
+            fraction = real(i - 1, f64) / real(numShells, f64)
+            v_bounds_c(i) = v_min * (v_max / v_min)**fraction
+        end do
+
+        do s = 1, numShells
+            shell_v_centers(s) = 0.5_f64 * (v_bounds_c(s) + v_bounds_c(s+1))
+        end do
+
+        ! 2. Compute Relative Profiles using the v^-3 Power Law at shell centers
+        do s = 1, numShells
+           shell_electron_density(s) = shell_v_centers(s)**(-3.0_f64)
+           shell_mass(s)    = shell_v_centers(s)**(-3.0_f64)
+        end do
+
+        ! 3. Normalize Electron Density Profile to match Target Bulk Density
+        total_rel_electrons = 0.0_f64
+        do s = 1, numShells
+           shell_rel_vol = v_bounds_c(s+1)**3 - v_bounds_c(s)**3
+           total_rel_electrons = total_rel_electrons + shell_electron_density(s) * shell_rel_vol
+        end do
+
+        total_rel_vol = v_bounds_c(numShells+1)**3 - v_bounds_c(1)**3
+        current_avg_ne = total_rel_electrons / total_rel_vol
+        scale_ne = averageElectronDensity / current_avg_ne
+
+        shell_electron_density(:) = shell_electron_density(:) * scale_ne
+
+        ! 4. Normalize Mass Profile cleanly
+        ! Find the sum of the raw v^-3 bin values
+        total_rel_mass = sum(shell_mass)
+        
+        ! Find the scale factor needed to make the array sum up to totalMassMsun
+        scale_mass = totalMassMsun / total_rel_mass
+        
+        ! Apply the scale factor directly to preserve the v^-3 shape per bin
+        shell_mass(:) = shell_mass(:) * scale_mass
+
+        ! 5. Output to file
+        open(30, file = 'velocityProfile')
+        do s  = 1, numshells
+            write(30,*) shell_v_centers(s), shell_mass(s), shell_electron_density(s)
+        end do
+        close(30)
+
+        !Assume a uniform temperature now, for easiness.
+        !Then, something like , 
+
+        dwl = (wl2 - wl1) / nwl 
+        wlarray(1) = wl1 
+        do s = 2,nwl 
+            wlarray(s) = wlarray(s-1) + dwl 
+        end do 
+
+        do s = 1, numshells
+            call colrad(3000.0_f64, & 
+            shell_electron_density(s),& 
+            .false., & 
+            shell_v_centers(s),& 
+            29.0_f64,&
+            shell_mass(s),& 
+            0.0_f64,& 
+            wl1,&
+            wl2,&
+            nwl,&
+            .false.,&
+            .false.,&
+            wlarray,&
+            currentspec& 
+            )
+
+            totalspec(:) = totalspec(:) + currentspec
+            !call colrad  !with a flag to do the box instead. 
+            !add spectra to  full spectra?
+            !output?
+
+        end do 
+       open(101,file='spectrum')
+       do j = 1, nwl
+           if (totalspec(j) >0) then 
+           if (totalspec(j) < 1e40_f64) write(101,*) wlarray(j)*1e7, totalspec(j)
+           end if 
+       end do
+       close(101)
+
+    end subroutine
+
+
+end module 

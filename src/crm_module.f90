@@ -403,6 +403,31 @@ end subroutine solve_cr_populations_axb
     end do 
 
   end subroutine
+
+  function   getAtomicDensityLocal(ionMassSolar,& 
+                                   atomicnumber,& 
+                                   velocity_outer,& 
+                                   velocity_inner,& 
+                                   fractionOverride,& 
+                                   time_exp_days,& 
+                                   electron_density_local)                                                                                 result(dens)
+    implicit none 
+    real(f64) :: dens, ionMassSolar,velocity_outer,velocity_inner,fractionOverride,time_exp_days
+    real(f64)  :: expansion_volume,time_exp_sec,electron_density_local
+    integer :: atomicnumber
+    real(f64),parameter :: c_cgs = 3e10_f64
+
+    time_exp_sec = time_exp_days * 86400.0_f64
+
+    !total volume.
+    expansion_volume = piFourOnThree * (velocity_outer*c_cgs * time_exp_sec) ** 3
+    expansion_volume = expansion_volume - piFourOnThree * (velocity_inner*c_cgs * time_exp_sec) ** 3
+
+    dens = ionMassSolar * m_solar_grams  / (expansion_volume*get_mass_grams(atomicnumber))
+
+    if (fractionOverride > 0.0_f64) dens = fractionOverride * electron_density_local
+    print*,'number density', dens,'cm-3'
+  end function 
     
   subroutine sobolev_escape(nlev,ntran,baseAvals,sobesc,time_exp_days,pops,weights,wl_cm_cubed,ionMassSolar,atomicnumber,velocity,fractionOverride,electron_density)
     !calculates Sobolev escape probability. 

@@ -25,7 +25,7 @@ module colradfort
     real(f64), allocatable :: sob(:), sob_old(:)
     !
     real(f64), allocatable :: wavelengthforspectrum(:)
-    real(f64), allocatable :: Gaussian(:)
+    real(f64), allocatable :: broadspec(:)
     !
     real(f64)              :: sob_damp    = 0.5_f64
     real(f64), parameter   :: sob_tol     = 1.0e-2_f64
@@ -74,8 +74,11 @@ module colradfort
                       wlmin_nm,               &
                       wlmax_nm,               &
                       numwl,                  &
-                      careful_la ,&
-                      writeoutrates)
+                      careful_la ,            &
+                      writeoutrates,          &
+                      wlspec,  &
+                      bspec               & 
+                      )
        
        real(f64) :: temperature 
        real(f64) :: density
@@ -85,6 +88,8 @@ module colradfort
        real(f64) :: fractionOverride       
        real(f64) :: wlmin_nm, wlmax_nm, dwl
        integer   :: numwl
+       real(f64) :: wlspec(numwl)
+       real(f64) :: bspec(numwl)
        logical :: sobolev,careful_la,writeoutrates
 
 
@@ -99,7 +104,7 @@ module colradfort
     !!    !$OMP DO SCHEDULE(STATIC)
        !do i = 1, numTempsReq
         i =1
-        !write(0,*) 'hello'
+        write(0,*) velocityExpansionC,massElementSolar
         call interpolate_upsilons(ntran, numTemps, temps, &
                                   temperature, ups, upsInterp)
         sob      = 1.0_f64
@@ -120,13 +125,13 @@ module colradfort
         popsnosob = col1
         call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, dens, energies)
         
-        Gaussian(:) = 0.0d0 
-        wavelengthforspectrum(1)     = wlmin_nm * 1e-7 
-        wavelengthforspectrum(numwl) = wlmax_nm * 1e-7
+        bspec(:) = 0.0d0 
+        wlspec(1)     = wlmin_nm * 1e-7 
+        wlspec(numwl) = wlmax_nm * 1e-7
 
         dwl = 1e-7 * (wlmax_nm - wlmin_nm) / numwl
         do j = 2, numwl-1
-            wavelengthforspectrum(j) = wavelengthforspectrum(j-1) + dwl
+            wlspec(j) = wlspec(j-1) + dwl
         end do 
         
 
@@ -201,11 +206,11 @@ module colradfort
        close(100)
      
        open(100,file='pecData')
-       write(100,*) 'Low, Upp,     Sob,    aval,     pec,    wlcm,    popL,    popU'
+       write(100,*) 'Low, Upp,     Sob,    aval,     pec,         wlcm,    popL,    popU'
        do j = 1, numLevels-1
          do k = j+1, numLevels
             p = upperTriangleIndexing(j, k, numLevels)
-            write(100,'(2I5,10ES9.2)') j, k, sob(p), aval(p),pec(p), wl_cm(p), col1(j), col1(k)
+            write(100,'(2I5,3ES9.2,ES14.7,2ES9.2)') j, k, sob(p), aval(p),pec(p), wl_cm(p), col1(j), col1(k)
         end do
        end do
 
@@ -213,14 +218,14 @@ module colradfort
        close(100)
 
        call cpu_time(t1)
-       call gaussianBroadenedSpectrum(size(wavelengthforspectrum),wavelengthforspectrum,velocityExpansionC,Gaussian,ntran,pec,wl_cm,dens,atomicnumber,massElementSolar)
+       call gaussianBroadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,dens,atomicnumber,massElementSolar)
        call cpu_time(t2)
        write(*,'(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2-t1, ' s'
 
        call cpu_time(t1)
        open(101,file='spectrum')
-       do j = 1, size(wavelengthforspectrum)
-           write(101,*) wavelengthforspectrum(j), Gaussian(j)
+       do j = 1, size(wlspec)
+           write(101,*) wlspec(j), bspec(j)
        end do
        close(101)
        call cpu_time(t2)
@@ -230,7 +235,7 @@ module colradfort
        close(6)
 
     end subroutine
-    
+        
     subroutine levelscan(temperature, density, careful_la,writeoutrates)
        real(f64) :: temperature 
        real(f64) :: density
@@ -373,7 +378,7 @@ module colradfort
        allocate(pecnosob(ntran))
        allocate(popcoronal(numlevels))
        allocate(cascade(numlevels))
-       allocate(wavelengthforspectrum(numwl),Gaussian(numwl))
+       allocate(wavelengthforspectrum(numwl),broadspec(numwl))
 
     end subroutine
 
@@ -396,7 +401,7 @@ module colradfort
        if (allocated(sob))                 deallocate(sob)
        if (allocated(sob_old))             deallocate(sob_old)
        if (allocated(wavelengthforspectrum)) deallocate(wavelengthforspectrum)
-       if (allocated(Gaussian))            deallocate(Gaussian)
+       if (allocated(broadspec))            deallocate(broadspec)
        if (allocated(cascade))            deallocate(cascade)
 
     end subroutine
