@@ -39,7 +39,8 @@ module colradfort
     integer                :: ioncharge_plus
     real(8) :: t1, t2 
     character(len=300)     ::broadmodedefault = 'gaussian'
-        
+    integer*8              :: shellnumtemp=0
+
     contains 
 
     subroutine getadf04(adf04Path,floersHack)
@@ -92,7 +93,7 @@ module colradfort
        integer   :: numwl
        real(f64) :: wlspec(numwl)
        real(f64) :: bspec(numwl)
-       
+       character(len=20) :: filesuffix
        real(f64) :: atomicDensityLocal,numIonsLocal
 
        logical :: sobolev,careful_la,writeoutrates
@@ -100,7 +101,7 @@ module colradfort
 
 
        tempsReq(1) = temperature 
-
+        shellnumtemp = shellnumtemp + 1
         i =1
         !write(0,*) velocityExpansionC,massElementSolar
         call interpolate_upsilons(ntran, numTemps, temps, &
@@ -130,7 +131,7 @@ module colradfort
         wlspec(1)     = wlmin_nm * 1e-7 
         wlspec(numwl) = wlmax_nm * 1e-7
 
-        dwl = 1e-7 * (wlmax_nm - wlmin_nm) / numwl
+        dwl = 1e-7 * (wlmax_nm - wlmin_nm) / (numwl-1)
         do j = 2, numwl-1
             wlspec(j) = wlspec(j-1) + dwl
         end do 
@@ -203,13 +204,18 @@ module colradfort
 
        call calculate_total_radiative_cascade(numlevels,ntran,aval,cascade)
 
-       open(100,file='popData')
+       if (shellnumtemp < 10) then 
+        write(filesuffix,'(2I1)') 0,shellnumtemp
+       else 
+        write(filesuffix,'(I2)') shellnumtemp 
+       end if 
+       open(100,file='popData'//trim(filesuffix))
         do j = 1,numlevels 
             write(100,'(I4,3ES11.4)') j ,col1(j),popcoronal(j),cascade(j) !, popcoronal(j)
         end do 
        close(100)
      
-       open(100,file='pecData')
+       open(100,file='pecData'//trim(filesuffix))
        write(100,*) 'Low, Upp,     Sob,    aval,     pec,         wlcm,    popL,    popU'
        do j = 1, numLevels-1
          do k = j+1, numLevels
@@ -227,7 +233,7 @@ module colradfort
        write(*,'(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2-t1, ' s'
 
        call cpu_time(t1)
-       open(101,file='spectrum')
+       open(101,file='spectrum'//trim(filesuffix))
        do j = 1, size(wlspec)
            write(101,*) wlspec(j), bspec(j)
        end do

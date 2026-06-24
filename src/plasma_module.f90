@@ -18,6 +18,7 @@ module plasma_module
         real(f64)             :: ei, ej 
         integer               :: ii , jj, pp
         !
+        plt = 0.0_f64
         do ii = 1, nlev-1 
             ei = energy(ii)
             do jj = ii+1,nlev

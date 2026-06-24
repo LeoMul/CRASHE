@@ -520,6 +520,7 @@ end subroutine solve_cr_populations_axb
     real(f64) :: thisphotonenergy 
 
     dwl = wavelength(2) - wavelength(1)
+    write(0,*) dwl 
     totalpec = sum(pec)
     peccutoff = pecthreshold * totalpec
 

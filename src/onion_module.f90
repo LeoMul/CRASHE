@@ -7,7 +7,7 @@ module onion_module
     subroutine onion 
         implicit none 
         ! dummy variables for testing. 
-        integer,parameter   :: numshells = 50 
+        integer,parameter   :: numshells = 10 
         real(f64) :: averageElectronDensity  
         real(f64) :: totalMassMsun = 1e-3 
         real(f64) :: v_min, v_max, fraction
@@ -79,6 +79,20 @@ module onion_module
         
         ! Apply the scale factor directly to preserve the v^-3 shape per bin
         shell_mass(:) = shell_mass(:) * scale_mass
+
+        total_rel_mass = 0.0_f64
+        do s = 1, numShells
+            shell_rel_vol = v_bounds_c(s+1)**3 - v_bounds_c(s)**3   ! proportional to physical vol
+            total_rel_mass = total_rel_mass + shell_mass(s) * shell_rel_vol
+        end do
+        scale_mass = totalMassMsun / total_rel_mass
+        
+        ! Now convert from density shape to actual mass per shell
+        do s = 1, numShells
+            shell_rel_vol = v_bounds_c(s+1)**3 - v_bounds_c(s)**3
+            shell_mass(s) = shell_mass(s) * scale_mass * shell_rel_vol
+        end do
+
 
         ! 5. Output to file
         open(30, file = 'velocityProfile')

@@ -1,5 +1,6 @@
 # `CRASHE` - Collisional Radiative modelling for AStrophysics with Homologous Expansion
 This is a code for solving collisional radiative problems, with atomic data input through the adf04 standard. Eventually, this will be a python package with compiled fortran doing the numerical work.
+
 Essentially, the equation of motion is something like
 
 $$
@@ -60,3 +61,11 @@ and all of the populations including the ground (total $N$) are stored in `col1`
 Should the user request Sobolev opacity with the namelist variable `sobolev=.true.`, they are required to additionally specify the time since explosion in days `timeSinceExplosionDays`. They should also specify one of:
 - `velocityExpansionC` - the rough expansion velocity in units of the speed of light, as well as `massElementSolar` the ionic mass in solar masses. From these two variables, combined with `timeSinceExplosionDays` - an estimate of the absolute number density of the element is calculated. Provided the code has been given an atomic number (which is gauranteed in the adf04), it makes an estimate of the number of particles as `massElementSolar / A(Z)` where `A(Z)` is the atomic mass.
 - or, `fractionOverride`- which sets the total ionic number density as `fractionOverride * electronDensity`. Note for total luminosity calculations the code will still need velocity (broadening) and mass (Sets the magnitude). 
+
+
+
+ Right now it is a single velocity model, but I am implemented an onion model of the form,
+$$
+n_e(v) = N v^{-\alpha}
+$$
+where $N$ is currently chosen to enforce some spherically averaged density. This is a work in progress. Currently it works fine, but is quite different to a single velocity model. This is perhaps to be expected, but I'm finding quite large emission from high densities near the ejecta. It is perhaps necessary to implement an attentuation through the ejecta with something like $e^{\tau}$. 
