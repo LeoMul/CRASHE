@@ -23,7 +23,7 @@ module onion_module
         real(f64) :: wl1 =  1000  
         real(f64) :: wl2 = 10000 
         integer,parameter   :: nwl = 1000 
-
+        real(f64) :: atomicDensityLocal
         real(f64) :: currentspec(nwl)
         real(f64) :: totalspec(nwl)
         real(f64) :: wlarray(nwl)
@@ -88,18 +88,18 @@ module onion_module
         end do 
 
         do s = 1, numshells
+
             call colrad(3000.0_f64, & 
             shell_electron_density(s),& 
             .false., & 
-            shell_v_centers(s),& 
             29.0_f64,&
-            shell_mass(s),& 
-            0.0_f64,& 
+            atomicDensityLocal,&
             wl1,&
             wl2,&
             nwl,&
             .false.,&
             .false.,&
+            shell_v_centers(s),& 
             wlarray,&
             currentspec& 
             )

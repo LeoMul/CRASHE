@@ -9,7 +9,7 @@ module colradfort
     implicit none
     integer                :: thrid
     integer                :: numlevels, numtemps, ntran, ierr, i, numTempsReq
-    real(f64)              :: temp, dens
+    real(f64)              :: temp
     real(f64)              :: plt, pltnosob
     real(f64), allocatable :: tempsReq(:)
     real(f64), allocatable :: temps(:)
@@ -27,6 +27,7 @@ module colradfort
     real(f64), allocatable :: wavelengthforspectrum(:)
     real(f64), allocatable :: broadspec(:)
     !
+    real(f64)              :: atomicDensity
     real(f64)              :: sob_damp    = 0.5_f64
     real(f64), parameter   :: sob_tol     = 1.0e-2_f64
     integer,   parameter   :: max_sob_iter = 9999
@@ -65,54 +66,51 @@ module colradfort
     end subroutine
 
     subroutine colrad(temperature,            & 
-                      density,                & 
+                      electronDensityLocal,   & 
                       sobolev,                &
-                      velocityExpansionC,     &
                       timeSinceExplosionDays, &
-                      massElementSolar,       &
-                      fractionOverride,       & 
+                      atomicDensityLocal,     &
                       wlmin_nm,               &
                       wlmax_nm,               &
                       numwl,                  &
                       careful_la ,            &
                       writeoutrates,          &
-                      wlspec,  &
-                      bspec               & 
+                      velocityExpansionC,     &
+                      wlspec,                 &
+                      bspec                   & 
                       )
        
        real(f64) :: temperature 
-       real(f64) :: density
+       real(f64) :: electronDensityLocal
        real(f64) :: velocityExpansionC     
        real(f64) :: timeSinceExplosionDays 
        real(f64) :: massElementSolar       
-       real(f64) :: fractionOverride       
        real(f64) :: wlmin_nm, wlmax_nm, dwl
        integer   :: numwl
        real(f64) :: wlspec(numwl)
        real(f64) :: bspec(numwl)
+       
+       real(f64) :: atomicDensityLocal 
+
        logical :: sobolev,careful_la,writeoutrates
 
 
 
        tempsReq(1) = temperature 
-       dens        = density
 
-
-    !!    !$OMP PARALLEL PRIVATE(crm, col1, pops_old, sob, sob_old, upsInterp, &
-    !!    !$OMP&                 sob_iter, sob_change, converged, ierr, thrid, i, j, k, p)
-    !!    thrid = omp_get_thread_num()
-    !!    !$OMP DO SCHEDULE(STATIC)
-       !do i = 1, numTempsReq
         i =1
-        write(0,*) velocityExpansionC,massElementSolar
+        !write(0,*) velocityExpansionC,massElementSolar
         call interpolate_upsilons(ntran, numTemps, temps, &
                                   temperature, ups, upsInterp)
         sob      = 1.0_f64
         
         call cpu_time(t1)
         call build_cr_matrix(numLevels, ntran, statweight, energies, &
-               upsInterp, aval, sob, tempsReq(i), dens, crm, col1, ierr,writeoutrates)
+               upsInterp, aval, sob, tempsReq(i), electronDensityLocal, crm, col1, ierr,writeoutrates)
         call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
+
+        !write(0,*) 'col1' , col1(:)
+
         call BoltzmanPopulation(numlevels,statweight,energies,tempsReq(i),popcoronal)
         
         call cpu_time(t2)
@@ -123,7 +121,7 @@ module colradfort
         pops_old = 0.0_f64
         
         popsnosob = col1
-        call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, dens, energies)
+        call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, electronDensityLocal, energies)
         
         bspec(:) = 0.0d0 
         wlspec(1)     = wlmin_nm * 1e-7 
@@ -140,18 +138,21 @@ module colradfort
             pecnosob  = pec 
             pltnosob  = plt 
             call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
-                                statweight, wl_cm_cubed, massElementSolar, atomicNumber, velocityExpansionC,fractionOverride,dens)
-            
+                                statweight, wl_cm_cubed,atomicDensityLocal)
+            !write(0,*) 'sob' , sob(:)
+            !write(0,*) 'col1' , col1(:)
+
             call cpu_time(t1)
             sob_iter_loop: do sob_iter = 1, max_sob_iter
                 call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                                     upsInterp, aval, sob, tempsReq(i), dens, crm, col1, ierr,writeoutrates)
+                                     upsInterp, aval, sob, tempsReq(i), electronDensityLocal, crm, col1, ierr,writeoutrates)
                 call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
-
+                !write(0,*) 'crm' , crm(:,:)
+                !write(0,*) 'sob' , sob(:)
                 sob_old = sob
 
                 call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
-                                    statweight, wl_cm_cubed, massElementSolar, atomicNumber, velocityExpansionC,fractionOverride,dens)
+                                    statweight, wl_cm_cubed,atomicDensityLocal)
                 sob     = sob_damp * sob + (1.0_f64 - sob_damp) * sob_old
 
                 !this is a fairly conservative convergence criterion - basically it asserts that 
@@ -193,7 +194,7 @@ module colradfort
 
 
        call cpu_time(t1)
-       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, dens, energies)
+       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, electronDensityLocal, energies)
        call cpu_time(t2)
        write(*,'(A,ES10.4,A)') '  [timing] PEC/PLT calculation : ', t2-t1, ' s'
 
@@ -218,7 +219,7 @@ module colradfort
        close(100)
 
        call cpu_time(t1)
-       call gaussianBroadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,dens,atomicnumber,massElementSolar)
+       call gaussianBroadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,electronDensityLocal,atomicnumber,massElementSolar)
        call cpu_time(t2)
        write(*,'(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2-t1, ' s'
 
@@ -236,13 +237,13 @@ module colradfort
 
     end subroutine
         
-    subroutine levelscan(temperature, density, careful_la,writeoutrates)
+    subroutine levelscan(temperature, electronDensityLocal, careful_la,writeoutrates)
        real(f64) :: temperature 
-       real(f64) :: density
+       real(f64) :: electronDensityLocal,dens
        real(f64),allocatable :: crm_copy(:,:), col1_copy(:)
        logical :: careful_la,writeoutrates
        tempsReq(1) = temperature 
-       dens        = density
+       dens        = electronDensityLocal
        allocate(crm_copy(numlevels-1,numlevels-1))
         sob      = 1.0_f64
        call interpolate_upsilons(ntran, numTemps, temps, &
@@ -274,12 +275,12 @@ module colradfort
     end subroutine
 
 
-    subroutine masscontour (temperature, density, requiredlumo,careful_la,writeoutrates)
+    subroutine masscontour (temperature, electronDensityLocal, requiredlumo,careful_la,writeoutrates)
        implicit none
        real(f64) :: temperature 
-       real(f64) :: density
+       real(f64) :: electronDensityLocal
        real(f64) :: requiredlumo  
-       real(f64) :: densityvary(1000)
+       real(f64) :: electronDensityLocalvary(1000)
        real(f64) :: temperaturevary(1000)
        real(f64) :: thislumo_per_ion
        real(f64) :: num_req, mass_req 
@@ -298,17 +299,17 @@ module colradfort
 
        !get central estimate 
        call interpolate_upsilons(ntran, numTemps, temps,temperature, ups, upsInterp)
-       call getmassestimate(temperature, density, mass_req,careful_la,writeoutrates)
+       call getmassestimate(temperature, electronDensityLocal, mass_req,careful_la,writeoutrates)
 
        write(90,'(A, ES14.6,A)') '# Central temp     = ', temperature,' Kelvin'
-       write(90,'(A, ES14.6,A)') '# Central dens     = ', density,' /cm3'
+       write(90,'(A, ES14.6,A)') '# Central dens     = ', electronDensityLocal,' /cm3'
        write(90,'(A, ES14.6,A)') '# Central estimate = ', mass_req,' Msun'
        write(90,'(A, I3)'    )   '# Atomic  number   = ', atomicnumber
        write(90,'(A, I3,A)'    ) '# Atomic  charge   = ', ioncharge_plus,' +'
 
 
        write(90,'(A, I10)'    )   '# ntemp = ',size(temperaturevary)
-       write(90,'(A, I10)'    )   '# ndens = ',size(densityvary)
+       write(90,'(A, I10)'    )   '# ndens = ',size(electronDensityLocalvary)
        write(90,'(A)') '# temp vary'
        !temperature grid
        xx = log10 (temps(size(temps)) / temps(1)) 
@@ -317,29 +318,29 @@ module colradfort
        do ii =  2, size(temperaturevary)
             temperaturevary(ii) = temperaturevary(ii-1) * xx
        end do 
-       !vary density
+       !vary electronDensityLocal
        temperaturevary(size(temperaturevary)) = temps(numtemps)
        do ii = 1, size(temperaturevary) 
         call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(ii), ups, upsInterp)
-        call getmassestimate(temperaturevary(ii), density, mass_req,careful_la,writeoutrates)
+        call getmassestimate(temperaturevary(ii), electronDensityLocal, mass_req,careful_la,writeoutrates)
         write(90,'(2ES14.6)') mass_req , temperaturevary(ii)       
        end do 
 
-       !density grid
-       densityvary(1) = 3.0 
-       densityvary(size(densityvary)) = 13.0 
-       xx = (densityvary(size(densityvary)) - densityvary(1)) / size(densityvary)
-       do ii = 2,size(densityvary)
-        densityvary(ii) = densityvary(ii-1) + xx  
+       !electronDensityLocal grid
+       electronDensityLocalvary(1) = 3.0 
+       electronDensityLocalvary(size(electronDensityLocalvary)) = 13.0 
+       xx = (electronDensityLocalvary(size(electronDensityLocalvary)) - electronDensityLocalvary(1)) / size(electronDensityLocalvary)
+       do ii = 2,size(electronDensityLocalvary)
+        electronDensityLocalvary(ii) = electronDensityLocalvary(ii-1) + xx  
        end do 
 
-       densityvary(:) = 10 ** densityvary(:)
+       electronDensityLocalvary(:) = 10 ** electronDensityLocalvary(:)
        write(90,'(A)') '# dens vary'
 
        call interpolate_upsilons(ntran, numTemps, temps,temperature, ups, upsInterp)
        do ii = 1, size(temperaturevary) 
-        call getmassestimate(temperature, densityvary(ii), mass_req,careful_la,writeoutrates)
-        write(90,'(2ES14.6)') mass_req , densityvary(ii)
+        call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates)
+        write(90,'(2ES14.6)') mass_req , electronDensityLocalvary(ii)
        end do 
 
        close(90)

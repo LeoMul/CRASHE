@@ -2,6 +2,7 @@ program mycrm
     use input
     use colradfort
     use onion_module
+    implicit none 
 
     open(6,file = 'crm.out')
 
@@ -13,18 +14,25 @@ program mycrm
     print*,mode
     if (mode .eq. 'astro') then
         
+        atomicDensity = getAtomicDensityLocal(massElementSolar ,&
+        atomicNumber,&
+        velocityExpansionC,&
+        0.0_f64,&
+        fractionOverride,&
+        timeSinceExplosionDays,&
+        density)
+
         call colrad(temperature,& 
                     density,&
                     sobolev,&
-                    velocityExpansionC,&
                     timeSinceExplosionDays,&
-                    massElementSolar,&
-                    fractionOverride,& 
+                    atomicDensity,&
                     wlmin_nm, &
                     wlmax_nm, &
                     numwl , &
                     careful_la, &
                     writeoutrates,& 
+                    velocityExpansionC,&
                     wavelengthforspectrum,&
                     broadspec)
 

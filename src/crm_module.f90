@@ -136,6 +136,12 @@ contains
     Qcol1   = 0.0_f64 
     Qrow1   = 0.0_f64
 
+    !print*,'build_cr_matrix: '
+    !print*,'  nlev=',nlev
+    !print*,'  ntran=',ntran
+    !print*,'  Te=',Te
+    !print*,'  Ne=',Ne
+
     if (writeoutrates) then 
       open(900,file='atomicRates.dat')
       write(900,*)'# Low   Upp   Upsilon      qexc    qdeexc      Aval      Besc Besc*Aval'
@@ -410,7 +416,7 @@ end subroutine solve_cr_populations_axb
                                    velocity_inner,& 
                                    fractionOverride,& 
                                    time_exp_days,& 
-                                   electron_density_local)                                                                                 result(dens)
+                                   electron_density_local) result(dens)
     implicit none 
     real(f64) :: dens, ionMassSolar,velocity_outer,velocity_inner,fractionOverride,time_exp_days
     real(f64)  :: expansion_volume,time_exp_sec,electron_density_local
@@ -426,52 +432,41 @@ end subroutine solve_cr_populations_axb
     dens = ionMassSolar * m_solar_grams  / (expansion_volume*get_mass_grams(atomicnumber))
 
     if (fractionOverride > 0.0_f64) dens = fractionOverride * electron_density_local
-    print*,'number density', dens,'cm-3'
+    print*,'number density', dens,'cm-3 from new routine'
   end function 
     
-  subroutine sobolev_escape(nlev,ntran,baseAvals,sobesc,time_exp_days,pops,weights,wl_cm_cubed,ionMassSolar,atomicnumber,velocity,fractionOverride,electron_density)
+  subroutine sobolev_escape(nlev,ntran,baseAvals,sobesc,time_exp_days,pops,weights,wl_cm_cubed,atomicDensityLocal)
     !calculates Sobolev escape probability. 
     implicit none 
-    integer :: nlev , ntran,atomicnumber
+    integer :: nlev , ntran
     !
     real(f64) ::  pops(nlev), weights(nlev)
     real(f64) :: baseAvals(ntran),wl_cm_cubed(ntran)
-    real(f64) :: sobesc(ntran),fractionOverride
+    real(f64) :: sobesc(ntran)
     ! 
-    real(f64) :: total_ion_density,ionMassSolar
+    real(f64) :: atomicDensityLocal
     real(f64) :: tau ,time_exp_days,time_exp_sec
-    real(f64) :: expansion_volume,velocity
-    real(f64) :: correction,electron_density
     real(f64),parameter :: c_cgs = 3e10_f64
     integer :: pp 
     integer :: ii , jj 
-    real(f64) :: num_ions 
     !
     time_exp_sec = time_exp_days * 86400.0_f64
 
-    expansion_volume = piFourOnThree * (velocity*c_cgs * time_exp_sec) ** 3
-    num_ions = m_solar_grams/ get_mass_grams(atomicnumber)
-    total_ion_density = ionMassSolar * m_solar_grams  / (expansion_volume*get_mass_grams(atomicnumber))
-    if (fractionOverride > 0.0_f64) total_ion_density = fractionOverride * electron_density
-    print*,'number density', total_ion_density,'cm-3'
 
-!    print*, total_ion_density,expansion_volume,get_mass_grams(atomicnumber),num_ions,ionMassSolar
+    
+    print*,'number density', atomicDensityLocal,'cm-3'
 
-    !should unphysically small populations have this skipped? 
 
     sobesc(:) = 1.0_f64
+
+    !write(0,*) 'sobconst',sobconst,atomicDensityLocal
 
     do ii = 1, nlev-1 
        do jj = ii+1,nlev
           pp  = upperTriangleIndexing(ii,jj,nlev)
 
-         ! correction = 1.0_f64 - weights(ii) * pops(jj) / (weights(jj) * pops(ii))
-!
-         ! tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp)   * total_ion_density * time_exp_sec * weights(jj)* pops(ii) / weights(ii)
-         ! tau = tau * correction
-
-          tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * total_ion_density * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
-
+          tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
+          !print*,tau, sobconst,baseAvals(pp),atomicDensityLocal,time_exp_sec
 
           if (tau > 1.0e-5_f64) sobesc(pp) = (1.0_f64 - exp(-tau)) / tau  
           if ( (tau < 0.0_f64) ) write(999,*) ii, pops(ii), jj,pops(jj),baseAvals(pp), tau
