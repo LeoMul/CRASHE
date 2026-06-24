@@ -64,8 +64,10 @@ Should the user request Sobolev opacity with the namelist variable `sobolev=.tru
 
 
 
- Right now it is a single velocity model, but I am implemented an onion model of the form,
+Right now it is a single velocity model, but I am implemented an onion model of the form,
+
 $$
 n_e(v) = N v^{-\alpha}
 $$
+
 where $N$ is currently chosen to enforce some spherically averaged density. This is a work in progress. Currently it works fine, but is quite different to a single velocity model. This is perhaps to be expected, but I'm finding quite large emission from high densities near the ejecta. It is perhaps necessary to implement an attentuation through the ejecta with something like $e^{\tau}$. 
