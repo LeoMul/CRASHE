@@ -6,6 +6,7 @@ module colradfort
     use interpolation_module
     use plasma_module
     use omp_lib
+    use input, only: mode,contourLower,contourUpper
     implicit none
     integer                :: thrid
     integer                :: numlevels, numtemps, ntran, ierr, i, numTempsReq
@@ -209,6 +210,9 @@ module colradfort
        else 
         write(filesuffix,'(I2)') shellnumtemp 
        end if 
+
+       if (mode .eq. 'astro') filesuffix(:) =''
+
        open(100,file='popData'//trim(filesuffix))
         do j = 1,numlevels 
             write(100,'(I4,3ES11.4)') j ,col1(j),popcoronal(j),cascade(j) !, popcoronal(j)
@@ -283,8 +287,8 @@ module colradfort
     end subroutine
 
 
-    subroutine masscontour (temperature, electronDensityLocal, requiredlumo,careful_la,writeoutrates)
-       implicit none
+    subroutine masscontour (temperature, electronDensityLocal, requiredlumo,careful_la,writeoutrates,verbose)
+        implicit none
        real(f64) :: temperature 
        real(f64) :: electronDensityLocal
        real(f64) :: requiredlumo  
@@ -293,14 +297,18 @@ module colradfort
        real(f64) :: thislumo_per_ion
        real(f64) :: num_req, mass_req 
        real(f64) :: num_in_one_solar_mass
-       integer :: ii 
+       integer :: ii,jj ,counterii=0,counterjj=0
        real(f64) :: xx 
        logical :: careful_la,writeoutrates
+       logical :: verbose
 
        num_in_one_solar_mass = 1.0 * m_solar_grams/ get_mass_grams(atomicnumber)
 
        sob=1
        
+
+     
+
        open(90,file = 'contour.out')
 
 
@@ -318,22 +326,14 @@ module colradfort
 
        write(90,'(A, I10)'    )   '# ntemp = ',size(temperaturevary)
        write(90,'(A, I10)'    )   '# ndens = ',size(electronDensityLocalvary)
-       write(90,'(A)') '# temp vary'
-       !temperature grid
+
        xx = log10 (temps(size(temps)) / temps(1)) 
        xx = 10**(xx/size(temperaturevary))
        temperaturevary(1) = temps(1)
        do ii =  2, size(temperaturevary)
             temperaturevary(ii) = temperaturevary(ii-1) * xx
        end do 
-       !vary electronDensityLocal
        temperaturevary(size(temperaturevary)) = temps(numtemps)
-       do ii = 1, size(temperaturevary) 
-        call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(ii), ups, upsInterp)
-        call getmassestimate(temperaturevary(ii), electronDensityLocal, mass_req,careful_la,writeoutrates)
-        write(90,'(2ES14.6)') mass_req , temperaturevary(ii)       
-       end do 
-
        !electronDensityLocal grid
        electronDensityLocalvary(1) = 3.0 
        electronDensityLocalvary(size(electronDensityLocalvary)) = 13.0 
@@ -343,29 +343,78 @@ module colradfort
        end do 
 
        electronDensityLocalvary(:) = 10 ** electronDensityLocalvary(:)
-       write(90,'(A)') '# dens vary'
 
-       call interpolate_upsilons(ntran, numTemps, temps,temperature, ups, upsInterp)
-       do ii = 1, size(temperaturevary) 
-        call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates)
-        write(90,'(2ES14.6)') mass_req , electronDensityLocalvary(ii)
-       end do 
+       if (.not. verbose) then 
+    
+        write(90,'(A)') '# temp vary'
+        
+        !vary electronDensityLocal
+        do ii = 1, size(temperaturevary) 
+         call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(ii), ups, upsInterp)
+         call getmassestimate(temperaturevary(ii), electronDensityLocal, mass_req,careful_la,writeoutrates)
+         write(90,'(2ES14.6)') mass_req , temperaturevary(ii)       
+        end do 
+
+
+        write(90,'(A)') '# dens vary'
+
+        call interpolate_upsilons(ntran, numTemps, temps,temperature, ups, upsInterp)
+        do ii = 1, size(electronDensityLocalvary) 
+         call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates)
+         write(90,'(2ES14.6)') mass_req , electronDensityLocalvary(ii)
+        end do 
+
+       
+       else 
+        
+        open(25,file='tempgrid')
+        open(26,file='densgrid')
+        do jj = 1, size(temperaturevary), 10 
+            write(25,'(1ES14.6)') temperaturevary(jj)
+        end do 
+
+        do ii = 1, size(electronDensityLocalvary), 10 
+            write(26,'(1ES14.6)') electronDensityLocalvary(ii)
+        end do 
+
+        close(26)
+        close(25)
+
+
+         do jj = 1, size(temperaturevary), 10 
+            counterjj = counterjj + 1
+            counterii = 0
+           call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(jj), ups, upsInterp)
+           do ii = 1, size(electronDensityLocalvary), 10 
+            counterii = counterii + 1 
+            call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates)
+            write(90,'(2I10,1ES14.6)') counterii,counterjj, mass_req
+            end do 
+         end do 
+
+
+        
+       end if 
+
 
        close(90)
 
        contains 
 
        subroutine getmassestimate(reqtemp, reqdens, reqmass,careful_la,writeoutrates)
+        use input, only: contourLower, contourUpper
         implicit none
+        
         real(f64) :: reqtemp, reqdens, reqmass
         logical :: careful_la,writeoutrates
+        integer :: pp
 
         call build_cr_matrix(numLevels, ntran, statweight, energies, &
                 upsInterp, aval, sob, reqtemp, reqdens, crm, col1, ierr,writeoutrates)
         call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
-
-        thislumo_per_ion = col1(2) * aval(1) * hc_ergcm / wl_cm(1)
-
+        pp = upperTriangleIndexing(contourLower,contourUpper,numlevels)
+        write(1414,*) '   The line in contour is: ',wl_cm(pp), aval(pp)
+        thislumo_per_ion = col1(contourUpper) * aval(pp) * hc_ergcm / wl_cm(pp)
         num_req = requiredlumo / thislumo_per_ion
         reqmass = num_req/num_in_one_solar_mass
        end subroutine

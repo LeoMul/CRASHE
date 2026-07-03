@@ -21,7 +21,9 @@ module input
     character(len=300) ::  mode              = 'astro' !calculation modes 
     logical   :: floersHack = .false.
     logical   :: writeoutrates =.false.
-    
+    logical   :: verbose = .false.
+    integer   :: contourLower = 1 
+    integer   :: contourUpper = 2 
     !
     character(len=300) :: adf04path =''
     character(len=256) :: error_msg
@@ -32,7 +34,8 @@ module input
                          massElementSolar,velocityExpansionC,     &
                          fractionOverride,timeSinceExplosionDays, & 
                          wlmin_nm,wlmax_nm,numwl,mode,requiredLumo,& 
-                         careful_la,floersHack,writeoutrates
+                         careful_la,floersHack,writeoutrates,verbose ,&
+                         contourLower,contourUpper 
                          
     contains
     subroutine getinput 

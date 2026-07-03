@@ -40,7 +40,7 @@ program mycrm
     else if (mode .eq. 'levelscan') then 
         call levelscan(temperature,density,careful_la,writeoutrates) 
     else if (mode .eq. 'masscontour') then 
-        call masscontour (temperature,density, requiredlumo,careful_la,writeoutrates)
+        call masscontour (temperature,density, requiredlumo,careful_la,writeoutrates,verbose)
     else if (mode .eq. 'onion') then 
         call onion
     else 
