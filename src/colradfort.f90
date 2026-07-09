@@ -6,7 +6,8 @@ module colradfort
     use interpolation_module
     use plasma_module
     use omp_lib
-    use input, only: mode,contourLower,contourUpper
+    use input, only: mode,contourLower,contourUpper,sortpec
+    use sorting
     implicit none
     integer                :: thrid
     integer                :: numlevels, numtemps, ntran, ierr, i, numTempsReq
@@ -96,10 +97,10 @@ module colradfort
        real(f64) :: bspec(numwl)
        character(len=20) :: filesuffix
        real(f64) :: atomicDensityLocal,numIonsLocal
-
+    
        logical :: sobolev,careful_la,writeoutrates
        character(len=300) :: broadmode
-
+       integer, allocatable :: pecPointer(:)
 
        tempsReq(1) = temperature 
         shellnumtemp = shellnumtemp + 1
@@ -218,16 +219,34 @@ module colradfort
             write(100,'(I4,3ES11.4)') j ,col1(j),popcoronal(j),cascade(j) !, popcoronal(j)
         end do 
        close(100)
-     
+
        open(100,file='pecData'//trim(filesuffix))
        write(100,*) 'Low, Upp,     Sob,    aval,     pec,         wlcm,    popL,    popU'
-       do j = 1, numLevels-1
-         do k = j+1, numLevels
-            p = upperTriangleIndexing(j, k, numLevels)
-            write(100,'(2I5,3ES9.2,ES14.7,2ES9.2)') j, k, sob(p), aval(p),pec(p), wl_cm(p), col1(j), col1(k)
-        end do
-       end do
 
+
+       if (sortpec) then 
+        allocate(pecPointer(size(pec))) 
+        do j=1, size(pec)
+            pecPointer(j) = j 
+        end do 
+
+        call qsort(pec, size(pec), pecPointer)
+
+        do j = size(pec),1, -1
+            write(100,'(3ES14.7)') aval(pecPointer(j)), wl_cm(pecPointer(j)), pec(j)
+        end do 
+
+        deallocate(pecPointer)
+
+       else
+
+        do j = 1, numLevels-1
+          do k = j+1, numLevels
+             p = upperTriangleIndexing(j, k, numLevels)
+             write(100,'(2I5,3ES9.2,ES14.7,2ES9.2)') j, k, sob(p), aval(p),pec(p), wl_cm(p), col1(j), col1(k)
+         end do
+        end do
+       end if 
 
        close(100)
 

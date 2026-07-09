@@ -22,8 +22,10 @@ module input
     logical   :: floersHack = .false.
     logical   :: writeoutrates =.false.
     logical   :: verbose = .false.
+    logical   :: sortpec = .false.
     integer   :: contourLower = 1 
     integer   :: contourUpper = 2 
+    integer   :: adfreadflag  = 0
     !
     character(len=300) :: adf04path =''
     character(len=256) :: error_msg
@@ -35,7 +37,7 @@ module input
                          fractionOverride,timeSinceExplosionDays, & 
                          wlmin_nm,wlmax_nm,numwl,mode,requiredLumo,& 
                          careful_la,floersHack,writeoutrates,verbose ,&
-                         contourLower,contourUpper 
+                         contourLower,contourUpper, sortpec,adfreadflag
                          
     contains
     subroutine getinput 

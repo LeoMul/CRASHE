@@ -3,6 +3,7 @@ module readadf04_module
     !it also has a hacked routine to read data from Floers - for compairson.
     !in doing that - there is an AI generated routine for getting the van-regemorter collision strengths.
     use types
+    use input,only: adfreadflag
     contains
         subroutine readadf04(filepath, numlevels, numtemps, ups, aval,statweight,energies, temps, wl_cm, wl_cm_cubed,atomicNumber,iq)
         
@@ -38,6 +39,16 @@ module readadf04_module
         character*2 :: iel,IONTRM
         integer :: iq,atomicNumber,iq1 
         real(f64) :: fipot
+        character*10 :: transitionFormat = '(2I4,A300)'
+        character*22 :: levelFormat      = '(I5,24X,f4.1,1x,f21.4)'
+
+        
+        if (adfreadflag /=0) then 
+            transitionFormat = '(2I5,A300)'
+            levelFormat      = '(I5,40X,f4.1,1x,f21.4)'
+        end if 
+
+
         !   
         inquire(file=filepath,exist=ex)
         if (.not.ex) then 
@@ -60,8 +71,8 @@ module readadf04_module
         allocate(energiesTemp(maxNumLevels),statweightTemp(maxNumLevels))
 
         do ii=1,maxIter
-            read (1,'(I5,24X,f4.1,1x,f21.4)',iostat=iostat) yy,myj,myenergy
-            !print*, myj,myenergy
+            read (1,levelFormat,iostat=iostat) yy,myj,myenergy
+            print*, myj,myenergy
             !read (1,'(I5,24X,f4.1,1x,f21.4)',iostat=iostat) yy,myj,myenergy 
             energiesTemp(ii) = myenergy 
             statweightTemp(ii) = 2.0d0 * myj + 1.0d0
@@ -127,7 +138,7 @@ module readadf04_module
         allocate(ups(numTemps,maxNumTransitions))
         do ii = 1,maxNumTransitions
             !not sure if this will work with all compilre==
-            read(1,'(2I4,A300)') yy,zz,templine 
+            read(1,transitionFormat) yy,zz,templine 
             if (yy.eq.-1) exit
             lower = min(zz,yy)
             upper = max(zz,yy)

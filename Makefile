@@ -50,14 +50,17 @@ $(OBJDIR)/plasma_module.o:    $(OBJDIR)/types.o \
                               $(OBJDIR)/periodic_table.o
 
 $(OBJDIR)/readadf04_module.o: $(OBJDIR)/types.o \
-                              $(OBJDIR)/interpolation_module.o
+                              $(OBJDIR)/interpolation_module.o \
+                              $(OBJDIR)/input.o 
 
 $(OBJDIR)/crm_module.o:       $(OBJDIR)/types.o \
                               $(OBJDIR)/interpolation_module.o \
                               $(OBJDIR)/readadf04_module.o    \
-                              $(OBJDIR)/plasma_module.o
+                              $(OBJDIR)/plasma_module.o \
+                              $(OBJDIR)/sorting.o
 
-$(OBJDIR)/colradfort.o:       $(OBJDIR)/crm_module.o
+$(OBJDIR)/colradfort.o:       $(OBJDIR)/crm_module.o \
+                              $(OBJDIR)/input.o 
 
 $(OBJDIR)/onion_module.o:     $(OBJDIR)/colradfort.o
 
