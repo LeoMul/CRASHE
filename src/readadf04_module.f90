@@ -258,6 +258,7 @@ module readadf04_module
         end subroutine
 
         end subroutine
+        
         function upperTriangleIndexing(lower,upper,rowsize)
         integer :: lower, upper,rowsize 
         integer :: upperTriangleIndexing 
@@ -266,6 +267,42 @@ module readadf04_module
             upper - lower - (lower*(lower-1))/2
         end function 
 
+        function triangleCount(L, rowsize)
+        integer :: L, rowsize
+        integer :: triangleCount
+        ! T(L) = number of (lower,upper) pairs with lower <= L
+        triangleCount = L*rowsize - (L*(L+1))/2
+        end function
+
+        subroutine inverseUpperTriangleIndexing(idx, rowsize, lower, upper)
+        integer, intent(in)  :: idx, rowsize
+        integer, intent(out) :: lower, upper
+        integer :: L
+        !integer :: triangleCount
+        real(8) :: n, disc, Lreal
+
+        n    = real(rowsize, 8)
+        disc = (2.0d0*n - 1.0d0)**2 - 8.0d0*real(idx, 8)
+        if (disc .lt. 0.0d0) disc = 0.0d0   ! guard against tiny negative from roundoff
+
+        Lreal = ((2.0d0*n - 1.0d0) - sqrt(disc)) / 2.0d0
+
+        ! initial guess, then correct for floating point error
+        L = ceiling(Lreal - 1.0d-9)
+        if (L .lt. 1) L = 1
+
+        do while (triangleCount(L, rowsize) .lt. idx)
+            L = L + 1
+        end do
+        do while (L .gt. 1)
+            if (triangleCount(L-1, rowsize) .lt. idx) exit
+            L = L - 1
+        end do
+
+        lower = L
+        upper = L + idx - triangleCount(L-1, rowsize)
+
+        end subroutine
 
         subroutine readhack(filepath, numlevels, numtemps, ups, aval,statweight,energies, temps, wl_cm, wl_cm_cubed,atomicNumber,iq)
             implicit none

@@ -233,7 +233,10 @@ module colradfort
         call qsort(pec, size(pec), pecPointer)
 
         do j = size(pec),1, -1
-            write(100,'(3ES14.7)') aval(pecPointer(j)), wl_cm(pecPointer(j)), pec(j)
+            call inverseupperTriangleIndexing(pecPointer(j), numLevels, k, p)
+
+
+            write(100,'(2I5,3ES9.2,ES14.7,2ES9.2)')k,p,sob(pecPointer(j)), aval(pecPointer(j)), pec(j), wl_cm(pecPointer(j)), col1(k), col1(p)
         end do 
 
         deallocate(pecPointer)
