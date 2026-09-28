@@ -36,7 +36,7 @@ module colradfort
     integer                :: sob_iter
     real(f64)              :: sob_change,beta_change,beta_change_old=1.d6
     logical                :: converged
-    integer                :: k, j, p
+    integer                :: k, j, p, l, ll
     integer                :: atomicNumber
     integer                :: ioncharge_plus
     real(8) :: t1, t2 
@@ -45,231 +45,205 @@ module colradfort
 
     contains 
 
-    subroutine getadf04(adf04Path,floersHack)
-        implicit none 
-        logical :: floershack
-       character(len=*) :: adf04Path
-
-       call cpu_time(t1)
-
-       if (floersHack) then 
-
-       call readhack(trim(adf04Path), numLevels, numTemps, ups, aval, &
-                      statweight, energies, temps, wl_cm, wl_cm_cubed,atomicNumber,ioncharge_plus)
-        
-       else
-       call readadf04(trim(adf04Path), numLevels, numTemps, ups, aval, &
-                      statweight, energies, temps, wl_cm, wl_cm_cubed,atomicNumber,ioncharge_plus)
-       end if 
-
-       call cpu_time(t2)
-
-       write(*,'(A,ES10.4,A)') '  [timing] adf04 read time     : ', t2-t1, ' s'
-
-       ntran = (numLevels * (numLevels - 1)) / 2
-    end subroutine
-
-    subroutine colrad(temperature,            & 
-                      electronDensityLocal,   & 
-                      sobolev,                &
-                      timeSinceExplosionDays, &
-                      atomicDensityLocal,     &
-                      wlmin_nm,               &
-                      wlmax_nm,               &
-                      numwl,                  &
-                      careful_la ,            &
-                      writeoutrates,          &
-                      velocityExpansionC,     &
-                      wlspec,                 &
-                      bspec,                  & 
-                      numIonsLocal,           &
-                      broadmode               &
-                      )
-       
-       real(f64) :: temperature 
-       real(f64) :: electronDensityLocal
-       real(f64) :: velocityExpansionC     
-       real(f64) :: timeSinceExplosionDays 
-       real(f64) :: massElementSolar       
-       real(f64) :: wlmin_nm, wlmax_nm, dwl
-       integer   :: numwl
-       real(f64) :: wlspec(numwl)
-       real(f64) :: bspec(numwl)
-       character(len=20) :: filesuffix
-       real(f64) :: atomicDensityLocal,numIonsLocal
-    
-       logical :: sobolev,careful_la,writeoutrates
-       character(len=300) :: broadmode
-       integer, allocatable :: pecPointer(:)
-
-       tempsReq(1) = temperature 
-        shellnumtemp = shellnumtemp + 1
-        i =1
-        !write(0,*) velocityExpansionC,massElementSolar
-        call interpolate_upsilons(ntran, numTemps, temps, &
-                                  temperature, ups, upsInterp)
-        sob      = 1.0_f64
-        
-        call cpu_time(t1)
-        call build_cr_matrix(numLevels, ntran, statweight, energies, &
-               upsInterp, aval, sob, tempsReq(i), electronDensityLocal, crm, col1, ierr,writeoutrates)
-        call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
-
-        !write(0,*) 'col1' , col1(:)
-
-        call BoltzmanPopulation(numlevels,statweight,energies,tempsReq(i),popcoronal)
-        
-        call cpu_time(t2)
-        write(*,'(A,ES10.4,A)') '  [timing] initial populations : ', t2-t1, ' s'
-        converged = .false.
-        sob      = 1.0_f64
-        sob_old  = 1.0_f64
-        pops_old = 0.0_f64
-        
-        popsnosob = col1
-        call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, electronDensityLocal, energies)
-        
-        bspec(:) = 0.0d0 
-        wlspec(1)     = wlmin_nm * 1e-7 
-        wlspec(numwl) = wlmax_nm * 1e-7
-
-        dwl = 1e-7 * (wlmax_nm - wlmin_nm) / (numwl-1)
-        do j = 2, numwl-1
-            wlspec(j) = wlspec(j-1) + dwl
-        end do 
-        
-
-        if (sobolev) then 
-            popsnosob = col1 
-            pecnosob  = pec 
-            pltnosob  = plt 
-            call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
-                                statweight, wl_cm_cubed,atomicDensityLocal)
-            !write(0,*) 'sob' , sob(:)
-            !write(0,*) 'col1' , col1(:)
-
+        subroutine getadf04(adf04Path,floersHack)
+            implicit none 
+            logical :: floershack
+            character(len=*) :: adf04Path
             call cpu_time(t1)
-            sob_iter_loop: do sob_iter = 1, max_sob_iter
-                call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                                     upsInterp, aval, sob, tempsReq(i), electronDensityLocal, crm, col1, ierr,writeoutrates)
-                call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
-                !write(0,*) 'crm' , crm(:,:)
-                !write(0,*) 'sob' , sob(:)
-                sob_old = sob
+            if (floersHack) then 
+            call readhack(trim(adf04Path), numLevels, numTemps, ups, aval, &
+                           statweight, energies, temps, wl_cm, wl_cm_cubed,atomicNumber,ioncharge_plus)
+            else
+            call readadf04(trim(adf04Path), numLevels, numTemps, ups, aval, &
+                           statweight, energies, temps, wl_cm, wl_cm_cubed,atomicNumber,ioncharge_plus)
+            end if 
+            call cpu_time(t2)
+            write(*,'(A,ES10.4,A)') '  [timing] adf04 read time     : ', t2-t1, ' s'
+            ntran = (numLevels * (numLevels - 1)) / 2
+        end subroutine
 
+        subroutine colrad(temperature,            & 
+                          electronDensityLocal,   & 
+                          sobolev,                &
+                          timeSinceExplosionDays, &
+                          atomicDensityLocal,     &
+                          wlmin_nm,               &
+                          wlmax_nm,               &
+                          numwl,                  &
+                          careful_la ,            &
+                          writeoutrates,          &
+                          velocityExpansionC,     &
+                          wlspec,                 &
+                          bspec,                  & 
+                          numIonsLocal,           &
+                          broadmode               &
+                          )
+            implicit none 
+        
+           real(f64) :: temperature 
+           real(f64) :: electronDensityLocal
+           real(f64) :: velocityExpansionC     
+           real(f64) :: timeSinceExplosionDays 
+           real(f64) :: wlmin_nm, wlmax_nm, dwl
+           integer   :: numwl
+           real(f64) :: wlspec(numwl)
+           real(f64) :: bspec(numwl)
+           character(len=20) :: filesuffix
+           real(f64) :: atomicDensityLocal,numIonsLocal
+        
+           logical :: sobolev,careful_la,writeoutrates
+           character(len=300) :: broadmode
+           integer, allocatable :: pecPointer(:)
+
+           tempsReq(1) = temperature 
+           shellnumtemp = shellnumtemp + 1
+           i =1
+           
+           call interpolate_upsilons(ntran, numTemps, temps, &
+                                     temperature, ups, upsInterp)
+           sob      = 1.0_f64
+        
+           call cpu_time(t1)
+           call build_cr_matrix(numLevels, ntran, statweight, energies, &
+                  upsInterp, aval, sob, tempsReq(i), electronDensityLocal, crm, col1, ierr,writeoutrates)
+           call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)   
+             
+           call BoltzmanPopulation(numlevels,statweight,energies,tempsReq(i),popcoronal)
+        
+           call cpu_time(t2)
+           write(*,'(A,ES10.4,A)') '  [timing] initial populations : ', t2-t1, ' s'
+           converged = .false.
+           sob      = 1.0_f64
+           sob_old  = 1.0_f64
+           pops_old = 0.0_f64
+        
+           popsnosob = col1
+           call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, electronDensityLocal, energies)
+        
+           bspec(:) = 0.0d0 
+           wlspec(1)     = wlmin_nm * 1e-7 
+           wlspec(numwl) = wlmax_nm * 1e-7   
+           dwl = 1e-7 * (wlmax_nm - wlmin_nm) / (numwl-1)
+           do j = 2, numwl-1
+               wlspec(j) = wlspec(j-1) + dwl
+           end do 
+
+
+            if (sobolev) then 
+                popsnosob = col1 
+                pecnosob  = pec 
+                pltnosob  = plt 
                 call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
                                     statweight, wl_cm_cubed,atomicDensityLocal)
-                sob     = sob_damp * sob + (1.0_f64 - sob_damp) * sob_old
 
-                !this is a fairly conservative convergence criterion - basically it asserts that 
-                !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
-                beta_change = maxval(abs(sob - sob_old)/sob)
-                
-                !call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, dens, energies)
-                !print*,plt
+                call cpu_time(t1)
+                sob_iter_loop: do sob_iter = 1, max_sob_iter
+                    call build_cr_matrix(numLevels, ntran, statweight, energies, &
+                                         upsInterp, aval, sob, tempsReq(i), electronDensityLocal, crm, col1, ierr,writeoutrates)
+                    call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
 
-                if (sob_iter > 1 .and. beta_change < sob_tol) then
-                    converged = .true.
-                    write(*,'(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
-                    write(*,'(A,ES10.4)')      '       with maximum dBeta/Beta : ', beta_change                    
-                    exit sob_iter_loop
+                    sob_old = sob
+
+                    call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
+                                        statweight, wl_cm_cubed,atomicDensityLocal)
+                    sob     = sob_damp * sob + (1.0_f64 - sob_damp) * sob_old
+
+                    !this is a fairly conservative convergence criterion - basically it asserts that 
+                    !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
+                    beta_change = maxval(abs(sob - sob_old)/sob)
+
+                    if (sob_iter > 1 .and. beta_change < sob_tol) then
+                        converged = .true.
+                        write(*,'(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
+                        write(*,'(A,ES10.4)')      '       with maximum dBeta/Beta : ', beta_change                    
+                        exit sob_iter_loop
+                    end if
+
+                    beta_change_old = beta_change
+
+                end do sob_iter_loop
+
+                call cpu_time(t2)
+                write(*,'(A,ES10.4,A)') '  [timing] Sobolev iteration   : ', t2-t1, ' s'
+
+                if (.not. converged) then
+                    write(*,'(A,I4,A,I3,A,2ES10.2)') &
+                        'WARNING: Sobolev did not converge for temp index ', i, &
+                        ' after ', max_sob_iter, ' iterations',beta_change,beta_change_old
                 end if
-
-                !if (beta_change < beta_change_old) then
-                !    sob_damp = min(sob_damp * 1.1, 1.0_f64) ! Can go to 1.0
-                !else
-                !    sob_damp = max(sob_damp * 0.8, 0.1_f64) ! Don't crash to 0
-                !end if
-                beta_change_old = beta_change
+            
+            end if 
 
 
-                !print*,beta_change,beta_change_old,sob_damp
+           call cpu_time(t1)
+           call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, electronDensityLocal, energies)
+           call cpu_time(t2)
+           write(*,'(A,ES10.4,A)') '  [timing] PEC/PLT calculation : ', t2-t1, ' s'
 
-            end do sob_iter_loop
+           call calculate_total_radiative_cascade(numlevels,ntran,aval,cascade)
 
-            call cpu_time(t2)
-            write(*,'(A,ES10.4,A)') '  [timing] Sobolev iteration   : ', t2-t1, ' s'
+           if (shellnumtemp < 10) then 
+            write(filesuffix,'(2I1)') 0,shellnumtemp
+           else 
+            write(filesuffix,'(I2)') shellnumtemp 
+           end if 
 
-            if (.not. converged) then
-                write(*,'(A,I4,A,I3,A,2ES10.2)') &
-                    'WARNING: Sobolev did not converge for temp index ', i, &
-                    ' after ', max_sob_iter, ' iterations',beta_change,beta_change_old
-            end if
-        
-        end if 
+           if (mode .eq. 'astro') filesuffix(:) =''
 
+           open(100,file='popData'//trim(filesuffix))
+            do j = 1,numlevels 
+                write(100,'(I4,3ES11.4)') j ,col1(j),popcoronal(j),cascade(j) !, popcoronal(j)
+            end do 
+           close(100)
 
-       call cpu_time(t1)
-       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, electronDensityLocal, energies)
-       call cpu_time(t2)
-       write(*,'(A,ES10.4,A)') '  [timing] PEC/PLT calculation : ', t2-t1, ' s'
-
-       call calculate_total_radiative_cascade(numlevels,ntran,aval,cascade)
-
-       if (shellnumtemp < 10) then 
-        write(filesuffix,'(2I1)') 0,shellnumtemp
-       else 
-        write(filesuffix,'(I2)') shellnumtemp 
-       end if 
-
-       if (mode .eq. 'astro') filesuffix(:) =''
-
-       open(100,file='popData'//trim(filesuffix))
-        do j = 1,numlevels 
-            write(100,'(I4,3ES11.4)') j ,col1(j),popcoronal(j),cascade(j) !, popcoronal(j)
-        end do 
-       close(100)
-
-       open(100,file='pecData'//trim(filesuffix))
-       write(100,*) 'Low, Upp,     Sob,    aval,     pec,         wlcm,    popL,    popU'
+           open(100,file='pecData'//trim(filesuffix))
+           write(100,*) 'Low, Upp,     Sob,    aval,     pec,         wlcm,    popL,    popU'
 
 
-       if (sortpec) then 
-        allocate(pecPointer(size(pec))) 
-        do j=1, size(pec)
-            pecPointer(j) = j 
-        end do 
+           if (sortpec) then 
+            allocate(pecPointer(size(pec))) 
+            do j=1, size(pec)
+                pecPointer(j) = j 
+            end do 
 
-        call qsort(pec, size(pec), pecPointer)
+            call qsort(pec, size(pec), pecPointer)
 
-        do j = size(pec),1, -1
-            call inverseupperTriangleIndexing(pecPointer(j), numLevels, k, p)
+            do j = size(pec),1, -1
+                call inverseupperTriangleIndexing(pecPointer(j), numLevels, k, p)
+                write(100,'(2I5,3ES9.2,ES14.7,3ES9.2)')k,p,sob(pecPointer(j)), aval(pecPointer(j)), pec(j), wl_cm(pecPointer(j)), col1(k), col1(p),upsInterp(pecPointer(j))
+            end do 
 
+            deallocate(pecPointer)
 
-            write(100,'(2I5,3ES9.2,ES14.7,2ES9.2)')k,p,sob(pecPointer(j)), aval(pecPointer(j)), pec(j), wl_cm(pecPointer(j)), col1(k), col1(p)
-        end do 
+           else
 
-        deallocate(pecPointer)
+            do j = 1, numLevels-1
+              do k = j+1, numLevels
+                 p = upperTriangleIndexing(j, k, numLevels)
+                 write(100,'(2I5,3ES9.2,ES14.7,3ES9.2)') j, k, sob(p), aval(p),pec(p), wl_cm(p), col1(j), col1(k),upsInterp(p)
+             end do
+            end do
+           end if 
 
-       else
+           close(100)
 
-        do j = 1, numLevels-1
-          do k = j+1, numLevels
-             p = upperTriangleIndexing(j, k, numLevels)
-             write(100,'(2I5,3ES9.2,ES14.7,2ES9.2)') j, k, sob(p), aval(p),pec(p), wl_cm(p), col1(j), col1(k)
-         end do
-        end do
-       end if 
+           call cpu_time(t1)
+           call broadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,electronDensityLocal,numIonsLocal,broadmode)
+           call cpu_time(t2)
+           write(*,'(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2-t1, ' s'
 
-       close(100)
+           call cpu_time(t1)
+           open(101,file='spectrum'//trim(filesuffix))
+           do j = 1, size(wlspec)
+               write(101,*) wlspec(j), bspec(j)
+           end do
+           close(101)
+           call cpu_time(t2)
+           write(*,'(A,ES10.4,A)') '  [timing] spectrum write      : ', t2-t1, ' s'
 
-       call cpu_time(t1)
-       call broadenedSpectrum(size(wlspec),wlspec,velocityExpansionC,bspec,ntran,pec,wl_cm,electronDensityLocal,numIonsLocal,broadmode)
-       call cpu_time(t2)
-       write(*,'(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2-t1, ' s'
+           close(1)
 
-       call cpu_time(t1)
-       open(101,file='spectrum'//trim(filesuffix))
-       do j = 1, size(wlspec)
-           write(101,*) wlspec(j), bspec(j)
-       end do
-       close(101)
-       call cpu_time(t2)
-       write(*,'(A,ES10.4,A)') '  [timing] spectrum write      : ', t2-t1, ' s'
-
-       close(1)
-
-    end subroutine
+        end subroutine
         
     subroutine levelscan(temperature, electronDensityLocal, careful_la,writeoutrates)
        real(f64) :: temperature 
@@ -337,7 +311,10 @@ module colradfort
 
        !get central estimate 
        call interpolate_upsilons(ntran, numTemps, temps,temperature, ups, upsInterp)
-       call getmassestimate(temperature, electronDensityLocal, mass_req,careful_la,writeoutrates)
+       call getmassestimate(temperature, electronDensityLocal, mass_req,careful_la,writeoutrates,num_req, & 
+        thislumo_per_ion,&
+        requiredLumo, & 
+        num_in_one_solar_mass)
 
        write(90,'(A, ES14.6,A)') '# Central temp     = ', temperature,' Kelvin'
        write(90,'(A, ES14.6,A)') '# Central dens     = ', electronDensityLocal,' /cm3'
@@ -373,7 +350,10 @@ module colradfort
         !vary electronDensityLocal
         do ii = 1, size(temperaturevary) 
          call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(ii), ups, upsInterp)
-         call getmassestimate(temperaturevary(ii), electronDensityLocal, mass_req,careful_la,writeoutrates)
+         call getmassestimate(temperaturevary(ii), electronDensityLocal, mass_req,careful_la,writeoutrates,num_req, & 
+        thislumo_per_ion,&
+        requiredLumo, & 
+        num_in_one_solar_mass)
          write(90,'(2ES14.6)') mass_req , temperaturevary(ii)       
         end do 
 
@@ -382,7 +362,10 @@ module colradfort
 
         call interpolate_upsilons(ntran, numTemps, temps,temperature, ups, upsInterp)
         do ii = 1, size(electronDensityLocalvary) 
-         call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates)
+         call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates,num_req, & 
+        thislumo_per_ion,&
+        requiredLumo, & 
+        num_in_one_solar_mass)
          write(90,'(2ES14.6)') mass_req , electronDensityLocalvary(ii)
         end do 
 
@@ -409,7 +392,10 @@ module colradfort
            call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(jj), ups, upsInterp)
            do ii = 1, size(electronDensityLocalvary), 10 
             counterii = counterii + 1 
-            call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates)
+            call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates,num_req, & 
+        thislumo_per_ion,&
+        requiredLumo, & 
+        num_in_one_solar_mass)
             write(90,'(2I10,1ES14.6)') counterii,counterjj, mass_req
             end do 
          end do 
@@ -417,31 +403,102 @@ module colradfort
 
         
        end if 
-
-
+       
        close(90)
 
        contains 
 
-       subroutine getmassestimate(reqtemp, reqdens, reqmass,careful_la,writeoutrates)
-        use input, only: contourLower, contourUpper
-        implicit none
-        
-        real(f64) :: reqtemp, reqdens, reqmass
-        logical :: careful_la,writeoutrates
-        integer :: pp
 
-        call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                upsInterp, aval, sob, reqtemp, reqdens, crm, col1, ierr,writeoutrates)
-        call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
-        pp = upperTriangleIndexing(contourLower,contourUpper,numlevels)
-        write(1414,*) '   The line in contour is: ',wl_cm(pp), aval(pp)
-        thislumo_per_ion = col1(contourUpper) * aval(pp) * hc_ergcm / wl_cm(pp)
-        num_req = requiredlumo / thislumo_per_ion
-        reqmass = num_req/num_in_one_solar_mass
-       end subroutine
 
     end subroutine masscontour
+
+    subroutine lineplot(requiredlumo)
+
+       real(f64) :: requiredlumo  
+       real(f64) :: electronDensityLocalvary(200)
+       real(f64) :: temperaturevary(3)
+       real(f64) :: thislumo_per_ion
+       real(f64) :: num_req, mass_req 
+       real(f64) :: num_in_one_solar_mass
+       real(f64) :: massdump(200)
+       integer :: ii,jj 
+       real(f64) :: xx 
+       logical :: careful_la=.false.,writeoutrates=.false.
+
+       num_in_one_solar_mass = 1.0 * m_solar_grams/ get_mass_grams(atomicnumber)
+       sob=1
+       xx = log10 (temps(size(temps)) / temps(1)) 
+       xx = 10**(xx/size(temperaturevary))
+       !temperaturevary(1) = temps(1)
+       !do ii =  2, size(temperaturevary)
+       !     temperaturevary(ii) = temperaturevary(ii-1) * xx
+       !end do
+
+       temperaturevary(1) =  1000
+       temperaturevary(2) =  3000 
+       temperaturevary(3) = 10000
+ 
+       electronDensityLocalvary(1) = 4.0 
+       electronDensityLocalvary(size(electronDensityLocalvary)) = 7.0 
+       xx = (electronDensityLocalvary(size(electronDensityLocalvary)) - electronDensityLocalvary(1)) / size(electronDensityLocalvary)
+       do ii = 2,size(electronDensityLocalvary)
+        electronDensityLocalvary(ii) = electronDensityLocalvary(ii-1) + xx  
+       end do 
+
+       electronDensityLocalvary(:) = 10 ** electronDensityLocalvary(:)
+
+       open(88, file = 'lineplot.dat')
+
+       write(88, '(1000ES10.3)') temperaturevary(:)
+       write(88, '(1000ES10.3)') electronDensityLocalvary(:)
+
+       do jj = 1, size(temperaturevary)
+        call interpolate_upsilons(ntran, numTemps, temps,temperaturevary(jj), ups, upsInterp)
+        do ii = 1, size(electronDensityLocalvary)
+
+            
+
+            call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req,careful_la,writeoutrates,num_req, & 
+            thislumo_per_ion,&
+            requiredLumo, & 
+            num_in_one_solar_mass)
+            massdump(ii) = mass_req
+        end do 
+        write(88,'(1000ES10.3)') massdump(:)
+
+       end do 
+
+
+    end subroutine
+
+
+
+    subroutine getmassestimate(&
+        reqtemp,& 
+        reqdens, &
+        reqmass,&
+        careful_la,&
+        writeoutrates, & 
+        num_req, & 
+        thislumo_per_ion,&
+        requiredLumo, & 
+        num_in_one_solar_mass)
+     use input, only: contourLower, contourUpper
+     implicit none
+     real(f64) :: num_req, thislumo_per_ion, requiredLumo, num_in_one_solar_mass
+     real(f64) :: reqtemp, reqdens, reqmass
+     logical :: careful_la,writeoutrates
+     integer :: pp
+     call build_cr_matrix(numLevels, ntran, statweight, energies, &
+             upsInterp, aval, sob, reqtemp, reqdens, crm, col1, ierr,writeoutrates)
+     call solve_cr_populations_axb(numLevels, crm,numLevels, col1, ierr,careful_la)
+     pp = upperTriangleIndexing(contourLower,contourUpper,numlevels)
+     write(1414,*) '   The line in contour is: ',wl_cm(pp), aval(pp)
+     thislumo_per_ion = col1(contourUpper) * aval(pp) * hc_ergcm / wl_cm(pp)
+     num_req = requiredlumo / thislumo_per_ion
+     reqmass = num_req/num_in_one_solar_mass
+
+    end subroutine
 
     subroutine alloc(numwl)
        implicit none 

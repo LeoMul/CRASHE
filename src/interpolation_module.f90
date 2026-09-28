@@ -28,7 +28,7 @@ module interpolation_module
         !
         !Take logs for easier interpolation 
         log_temps_adf04 = log10(temps_adf04)
-        log_temp_req   = log10(temp_req  )
+        log_temp_req    = log10(temp_req  )
 
         do ii = 1, ntran 
             call spline(log_temps_adf04,ups_adf04(:,ii),ntemps_adf04,0.0d0,0.0d0,yy)

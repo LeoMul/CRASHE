@@ -41,6 +41,8 @@ program mycrm
         call levelscan(temperature,density,careful_la,writeoutrates) 
     else if (mode .eq. 'masscontour') then 
         call masscontour (temperature,density, requiredlumo,careful_la,writeoutrates,verbose)
+    else if (mode .eq. 'lineplot') then 
+         call lineplot (requiredLumo)
     else if (mode .eq. 'onion') then 
         call onion
     else 

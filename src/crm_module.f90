@@ -145,7 +145,6 @@ contains
     if (writeoutrates) then 
       open(900,file='atomicRates.dat')
       write(900,*)'# Low   Upp   Upsilon      qexc    qdeexc      Aval      Besc Besc*Aval'
-
     end if 
 
 
@@ -158,12 +157,6 @@ contains
       end do
     end do
 
-    !do j = 2, nlev
-    !  jj = j - 1
-    !  call cr_matrix_element(1, j, Qrow1(jj), Qcol1(jj))
-    !end do
-
-    !This part takes the off diagonal elements and constructs the diagonal elements.
     do j = 2, nlev
       jj = j - 1
       Q(jj, jj) = 0.0_f64
@@ -178,20 +171,6 @@ contains
     if (writeoutrates) then 
       close(900)
     end if 
-
-    !open(88,file='crmmatrix')
-    !do j = 2, nlev
-    !  jj = j - 1
-    !  write(88,'(10000(ES10.3,1X))') Q(:,jj)
-!
-    !end do
-    !close(88)
-
-    !write(*,'(A)') 'Column sum check (should be ~ 0):'
-    !do j = 2, nlev
-    !  jj = j - 1
-    !  write(*,'(A,I4,A,ES12.4)') '  col ', j, ': ', sum(Q(:,jj)) + Qrow1(jj)
-    !end do
 
   contains
 
@@ -218,7 +197,6 @@ contains
       if (writeoutrates) then 
         write(900,'(2I6,6ES10.3)') iii,jjj, Ups(pp), q_exc, q_deexc, Aval(pp), sob(pp), Aval(pp) * sob(pp)              
       end if 
-
 
     end subroutine cr_matrix_element
 
@@ -327,70 +305,6 @@ subroutine solve_cr_populations_axb(nlev, Q, numlevelsincluded, Qcol1, ierr, use
 
 end subroutine solve_cr_populations_axb
 
-!  subroutine solve_cr_populations_axb(nlev, Q,numlevelsincluded, Qcol1, ierr)
-!    implicit none
-!    integer,  intent(in)    :: nlev,numlevelsincluded
-!    real(f64), intent(inout)    :: Q(nlev-1, nlev-1)
-!    real(f64), intent(inout) :: Qcol1(nlev)
-!    integer,  intent(out)   :: ierr
-!
-!    integer, allocatable :: ipiv(:)
-!    integer :: i, info, n,ninc
-!
-!    n    = nlev - 1
-!    ninc = numlevelsincluded - 1 
-!    ierr = 0
-!
-!    allocate(ipiv(n))
-!
-!    !Indexing is off by one, as Qcol1 does not yet include the ground.
-!    do i = 1, numlevelsincluded-1
-!      Qcol1(i) = -1.0_f64 * Qcol1(i)
-!    end do
-!
-!    do i = numlevelsincluded, nlev 
-!      Qcol1(i) = 0.0d0 
-!    end do 
-!    
-!
-!
-!    !If I wanted to do a study on including a different number of levels,
-!    !I would need to change this to something like:
-!    ! call dgesv(n_being_used, 1, Q, n, ipiv, Qcol1, nlev, info)
-!    !write(*,*) 'Calling dgesv with ', numlevelsincluded, ' levels included.'
-!
-!    call dgesv(ninc, 1, Q, n, ipiv, Qcol1, nlev, info)
-!    
-!    !some high lying levels will have unphysical populations. The correct
-!    !answer is so small that it doesnt matter. 
-!
-!    deallocate(ipiv)  !One must consider if we should be pre-allocating ipiv and reusing it.
-!                      ! It gets resued at every sobolev iteration.
-!
-!    if (info /= 0) then
-!      write(*,'(A,I4)') 'ERROR: DGESV failed, info = ', info
-!      ierr = info
-!      return
-!    end if
-!
-!    do i = ninc, 1, -1
-!      Qcol1(i+1) = Qcol1(i)
-!    end do
-!    Qcol1(1) = 1.0_f64
-!    !write(*,*) Qcol1(:)
-!    Qcol1 = Qcol1 / sum(Qcol1)
-!
-!    !do i = 1, nlev
-!    !  write(*,*) i, Qcol1(i)
-!    !end do
-!
-!    !write(*,'(A,I6)') 'Negative # = ', count(Qcol1 < 0.0_f64)
-!!
-!    if (any(Qcol1 < 0.0_f64)) then
-!      stop ' negative pops - numerical stability '
-!    end if
-!
-!  end subroutine solve_cr_populations_axb
 
   subroutine calculate_total_radiative_cascade(nlev,ntran,avals,cascade)
     integer   :: nlev, ntran 
@@ -436,7 +350,9 @@ end subroutine solve_cr_populations_axb
 
     if (fractionOverride > 0.0_f64) denslocal = fractionOverride * electron_density_local
     print*,'atomic number density', denslocal,'cm-3 from new routine. edense=', electron_density_local
-    write(0,*) denslocal
+
+    !write(0,*) denslocal,'yes',expansion_volume,piFourOnThree,velocity_outer,time_exp_sec
+
   end subroutine 
     
   subroutine sobolev_escape(nlev,ntran,baseAvals,sobesc,time_exp_days,pops,weights,wl_cm_cubed,atomicDensityLocal)
@@ -590,90 +506,6 @@ end subroutine solve_cr_populations_axb
   
   end subroutine
 
-!  subroutine broadenedSpectrum(numWavelengths,& 
-!                                       wavelength,&
-!                                       velocityShell,&
-!                                       spectra, &
-!                                       ntran, &
-!                                       pec, &
-!                                       spectralLinesCM,&
-!                                       electron_density,&
-!                                       numIonsLocal, & 
-!                                       calcMode &
-!                                       )
-!    !
-!    ! Calculates \sum_i nf * PEC * exp ( -0.5 *  [ (λ - λ_0 ) / σ ]^2)
-!    ! where all wavelengths are in nm. the norm factor nf - is 1/nf = 10 sqrt(2pi) σ
-!    ! where the extra factor of 10 puts it in units of per angstrom.
-!    ! units are annoying. Should probably just keep everything in cgs and ship 
-!    ! a post processor with astropy, for my own sanity. 
-!    !
-!    character* 10 :: calcmode
-!    integer :: numWavelengths
-!    integer :: ntran 
-!    real(f64) :: wavelength(numWavelengths),electron_density
-!    real(f64) :: spectra(numWavelengths)
-!    real(f64) :: pec(ntran)
-!    real(f64) :: spectralLinesCM(ntran)
-!    real(f64) :: ww, wavelengthCentral
-!    real(f64) :: velocityShell, sig_cm, sigOneOver,numIonsLocal
-!    integer :: ii, jj 
-!
-!
-!    real(f64) :: normfactor
-!    real(f64) :: thispec,wl_lo,wl_hi, nsigmacut=4,dwl
-!    integer :: jlo, jhi 
-!    real(f64) :: totalpec 
-!    real(f64) :: pecthreshold = 1e-4
-!    real(f64) :: peccutoff
-!    real(f64) :: thisphotonenergy 
-!    dwl = wavelength(2) - wavelength(1)
-!    totalpec = sum(pec)
-!
-!    peccutoff = pecthreshold * totalpec
-!
-!    !velocityShell = velocityFWHM in the case of a Gaussian model, e.g for a single shell.
-!
-!    ! Calculate Gaussian spectrum
-!    do ii = 1, ntran 
-!      !cm
-!      wavelengthCentral = spectralLinesCM(ii)
-!
-!      if (wavelengthCentral < 1e-30) cycle
-!
-!      thispec = pec(ii)
-!
-!      if (thispec < peccutoff) cycle
-!
-!      sig_cm = fwhmSigma * wavelengthCentral  * velocityShell
-!
-!      sigOneOver = 1._f64/sig_cm
-!
-!      normfactor = sigOneOver * oneOverSQRTTWOPI / wavelengthCentral
-!
-!      wl_lo = wavelengthCentral - nSigmaCut * sig_cm
-!      wl_hi = wavelengthCentral + nSigmaCut * sig_cm
-!      jlo = max(1,              nint((wl_lo - wavelength(1)) / dwl) + 1)
-!      jhi = min(numWavelengths, nint((wl_hi - wavelength(1)) / dwl) + 1)
-!      thisphotonenergy = thispec 
-!
-!      do jj = jlo, jhi
-!
-!        ww = wavelength(jj) 
-!        ww = (ww - wavelengthCentral) 
-!        ww = ww * sigOneOver
-!        ww = thisphotonenergy * normfactor * exp ( minusHalf * ww * ww  )
-!        spectra(jj) = spectra(jj) + ww 
-!
-!      end do 
-!    end do 
-!    
-!    spectra(:) = spectra(:) * ( numIonsLocal * electron_density * hc_ergcm  * 1e-8) !1e-8 to get in ergs per ang per s
-!    
-!    !print*,num_ions, maxval(spectra)
-!
-!  
-!  end subroutine
 
 
 end module crm_module
