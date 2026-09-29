@@ -20,7 +20,7 @@ module input
     real(f64)          :: requiredLumo           = 1.0e37_f64
     character(len=300) ::  mode                  = 'astro' !calculation modes 
     logical            :: floersHack             = .false.
-    logical            :: writeoutrates          =.false.
+    logical            :: writeoutrates          = .false.
     logical            :: verbose                = .false.
     logical            :: sortpec                = .false.
     integer            :: contourLower           = 1 

@@ -106,10 +106,96 @@ contains
 
   end subroutine
 
+  subroutine solve_cr_with_continuity(nlev, ntran, g, E, Ups, Aval, sob, Te, Ne, Q, pops, ierr)
+    implicit none
+    integer,  intent(in)  :: nlev, ntran
+    real(f64), intent(in)  :: g(nlev)
+    real(f64), intent(in)  :: E(nlev)
+    real(f64), intent(in)  :: Ups(ntran)
+    real(f64), intent(in)  :: Aval(ntran)
+    real(f64), intent(in)  :: sob(ntran)
+
+    real(f64), intent(in)  :: Ne
+    real(f64), intent(in)  :: Te
+    real(f64), intent(inout) :: Q(nlev, nlev)
+    real(f64), intent(out) :: pops(nlev)
+    integer, allocatable   :: ipiv(:)
+    integer,  intent(out) :: ierr
+    integer  :: i, j, info
+    real(f64) :: kT, sqrt_Te, dE, q_exc, q_deexc
+    logical :: writeoutrates
+    kT      = kB_eV * Te
+    sqrt_Te = sqrt(Te)
+    Q(:,:) = 0.0_f64
+    do j = 2, nlev
+      do i = 1, j - 1
+        call cr_matrix_element(i, j, Q(i,j), Q(j,i))
+      end do
+      
+    end do
+    do j = 1,nlev 
+      Q(j,j) = -sum(Q(:,j))
+    end do 
+
+
+    Q(1,:) = 1.0_f64
+
+    do j = 1, nlev 
+      write(68,*) Q(:,j)
+    end do 
+
+    pops(:) = 0.0_f64 
+    pops(1) = 1.0_f64
+    
+    allocate(ipiv(nlev))
+    call dgesv(nlev, 1, Q, nlev, ipiv, pops, nlev, info)
+    write(69,*) info,pops
+    deallocate(ipiv)
+
+
+    contains
+
+      subroutine cr_matrix_element(iii, jjj, cij, cji)
+      implicit none
+      integer,  intent(in)    :: iii, jjj
+      real(f64), intent(inout) :: cij, cji
+      integer :: pp
+
+      pp  = upperTriangleIndexing(iii, jjj, nlev)
+      dE  = E(jjj) - E(iii)
+
+      !q_deexc = (coll_fac / (g(jjj) * sqrt_Te)) * Ups(pp)
+
+      q_deexc = coll_fac * Ups(pp) / sqrt_Te
+      ! 
+      if (de / kT < 0.20_f64 ) then 
+        q_exc = q_deexc * (1.0_f64 - dE/kT) / g(iii) 
+      else if (dE / kT < 700.0_f64) then
+        q_exc = q_deexc * exp(-dE / kT) / g(iii) 
+      else
+        q_exc = 0.0_f64
+      end if
+!
+      q_deexc = q_deexc / g(jjj)
+!
+      cji = cji + Ne * q_exc
+      cij = cij + Ne * q_deexc + Aval(pp) * sob(pp)
+
+      if (writeoutrates) then 
+        write(900,'(2I6,6ES10.3)') iii,jjj, Ups(pp), q_exc, q_deexc, Aval(pp), sob(pp), Aval(pp) * sob(pp)              
+      end if 
+
+    end subroutine cr_matrix_element
+
+
+  end subroutine
 
   subroutine build_cr_matrix(nlev, ntran, g, E, Ups, Aval, sob, Te, Ne, Q, Qcol1, ierr,writeoutrates)
     !This routine was AI assisted. 
     !Has been tested against ColRadPy. 
+    !I think this is too difficult to maintain - and it
+    !might be better to do the full matrix and replace the first row 
+    !with continuity. 
     implicit none
     integer,  intent(in)  :: nlev, ntran
     real(f64), intent(in)  :: g(nlev)
@@ -183,14 +269,20 @@ contains
       pp  = upperTriangleIndexing(iii, jjj, nlev)
       dE  = E(jjj) - E(iii)
 
-      q_deexc = (coll_fac / (g(jjj) * sqrt_Te)) * Ups(pp)
+      !q_deexc = (coll_fac / (g(jjj) * sqrt_Te)) * Ups(pp)
 
-      if (dE / kT < 700.0_f64) then
-        q_exc = (coll_fac / (g(iii) * sqrt_Te)) * Ups(pp) * exp(-dE / kT)
+      q_deexc = coll_fac * Ups(pp) / sqrt_Te
+      ! 
+      if (de / kT < 0.20_f64 ) then 
+        q_exc = q_deexc * (1.0_f64 - dE/kT) / g(iii) 
+      else if (dE / kT < 700.0_f64) then
+        q_exc = q_deexc * exp(-dE / kT) / g(iii) 
       else
         q_exc = 0.0_f64
       end if
-
+!
+      q_deexc = q_deexc / g(jjj)
+!
       cji = cji + Ne * q_exc
       cij = cij + Ne * q_deexc + Aval(pp) * sob(pp)
 
@@ -202,108 +294,108 @@ contains
 
   end subroutine build_cr_matrix
 
-subroutine solve_cr_populations_axb(nlev, Q, numlevelsincluded, Qcol1, ierr, use_expert)
-    !This routine was AI assisted - particularly for the use of dgesvx in cases where the 
-    !user is worried about accuracy.
+  subroutine solve_cr_populations_axb(nlev, Q, numlevelsincluded, Qcol1, ierr, use_expert)
+      !This routine was AI assisted - particularly for the use of dgesvx in cases where the 
+      !user is worried about accuracy.
 
-    implicit none
-    integer,   intent(in)    :: nlev, numlevelsincluded
-    real(f64), intent(inout) :: Q(nlev-1, nlev-1)
-    real(f64), intent(inout) :: Qcol1(nlev)
-    integer,   intent(out)   :: ierr
-    logical,   intent(in)    :: use_expert
+      implicit none
+      integer,   intent(in)    :: nlev, numlevelsincluded
+      real(f64), intent(inout) :: Q(nlev-1, nlev-1)
+      real(f64), intent(inout) :: Qcol1(nlev)
+      integer,   intent(out)   :: ierr
+      logical,   intent(in)    :: use_expert
 
-    integer, allocatable :: ipiv(:)
-    integer :: i, info, n, ninc
+      integer, allocatable :: ipiv(:)
+      integer :: i, info, n, ninc
 
-    ! dgesvx-only variables
-    real(f64), allocatable :: AF(:,:), R(:), C(:), B(:), X(:), ferr(:), berr(:)
-    real(f64) :: rcond
-    character(1) :: equed
-    integer, allocatable :: ipiv_ex(:)
-    real(f64), allocatable :: work(:)
-    integer,   allocatable :: iwork(:)
+      ! dgesvx-only variables
+      real(f64), allocatable :: AF(:,:), R(:), C(:), B(:), X(:), ferr(:), berr(:)
+      real(f64) :: rcond
+      character(1) :: equed
+      integer, allocatable :: ipiv_ex(:)
+      real(f64), allocatable :: work(:)
+      integer,   allocatable :: iwork(:)
 
-    n    = nlev - 1
-    ninc = numlevelsincluded - 1
-    ierr = 0
+      n    = nlev - 1
+      ninc = numlevelsincluded - 1
+      ierr = 0
 
-    do i = 1, numlevelsincluded - 1
-        Qcol1(i) = -1.0_f64 * Qcol1(i)
-    end do
-    do i = numlevelsincluded, nlev
-        Qcol1(i) = 0.0d0
-    end do
+      do i = 1, numlevelsincluded - 1
+          Qcol1(i) = -1.0_f64 * Qcol1(i)
+      end do
+      do i = numlevelsincluded, nlev
+          Qcol1(i) = 0.0d0
+      end do
 
-    if (use_expert) then
-        !begin gemini contrbution:
-        !write(0,*) 'using expensive la'
+      if (use_expert) then
+          !begin gemini contrbution:
+          !write(0,*) 'using expensive la'
 
-        allocate(AF(n, n), R(ninc), C(ninc), B(ninc), X(ninc), ferr(1), berr(1), ipiv_ex(ninc))
-        allocate(work(4*n), iwork(n))
+          allocate(AF(n, n), R(ninc), C(ninc), B(ninc), X(ninc), ferr(1), berr(1), ipiv_ex(ninc))
+          allocate(work(4*n), iwork(n))
 
-        !write(0,*) 'ninc=', ninc, ' n=', n, ' shape(Q)=', shape(Q), ' shape(AF)=', shape(AF)
-        !write(0,*) 'shape(R)=', shape(R), ' shape(C)=', shape(C)
-        !write(0,*) 'shape(B)=', shape(B), ' shape(X)=', shape(X)
+          !write(0,*) 'ninc=', ninc, ' n=', n, ' shape(Q)=', shape(Q), ' shape(AF)=', shape(AF)
+          !write(0,*) 'shape(R)=', shape(R), ' shape(C)=', shape(C)
+          !write(0,*) 'shape(B)=', shape(B), ' shape(X)=', shape(X)
 
-        B(1:ninc) = Qcol1(1:ninc)
+          B(1:ninc) = Qcol1(1:ninc)
 
 
-        ! dgesvx: equilibrates, factors, solves, and gives forward/backward error bounds
-        ! and a reciprocal condition number estimate (rcond).
-        ! 'E' = equilibrate, factor, solve.  'N' = no transpose.
-        call dgesvx('E', 'N',           &
-                    ninc, 1,            &   ! matrix size, nrhs
-                    Q, n,               &   ! A, lda
-                    AF, n,              &   ! factored A (output), ldaf
-                    ipiv_ex,            &   ! pivot indices
-                    equed,              &   ! equilibration actually applied (output)
-                    R, C,               &   ! row/col scale factors (output)
-                    B, ninc,            &   ! RHS, ldb
-                    X, ninc,            &   ! solution (output), ldx
-                    rcond,              &   ! reciprocal condition number (output)
-                    ferr, berr,         &   ! forward/backward error bounds (output)
-                          work, iwork, &
+          ! dgesvx: equilibrates, factors, solves, and gives forward/backward error bounds
+          ! and a reciprocal condition number estimate (rcond).
+          ! 'E' = equilibrate, factor, solve.  'N' = no transpose.
+          call dgesvx('E', 'N',           &
+                      ninc, 1,            &   ! matrix size, nrhs
+                      Q, n,               &   ! A, lda
+                      AF, n,              &   ! factored A (output), ldaf
+                      ipiv_ex,            &   ! pivot indices
+                      equed,              &   ! equilibration actually applied (output)
+                      R, C,               &   ! row/col scale factors (output)
+                      B, ninc,            &   ! RHS, ldb
+                      X, ninc,            &   ! solution (output), ldx
+                      rcond,              &   ! reciprocal condition number (output)
+                      ferr, berr,         &   ! forward/backward error bounds (output)
+                            work, iwork, &
 
-                    info)
+                      info)
 
-        if (rcond < epsilon(1.0_f64)) then
-            write(6,'(A,ES10.3)') 'WARNING: matrix is near-singular, rcond = ', rcond
-        end if
+          if (rcond < epsilon(1.0_f64)) then
+              write(6,'(A,ES10.3)') 'WARNING: matrix is near-singular, rcond = ', rcond
+          end if
 
-        write(6,'(A,ES10.3,A,ES10.3)') &
-            'dgesvx: rcond = ', rcond, '  ferr = ', ferr(1)
+          write(6,'(A,ES10.3,A,ES10.3)') &
+              'dgesvx: rcond = ', rcond, '  ferr = ', ferr(1)
 
-        Qcol1(1:ninc) = X(1:ninc)
+          Qcol1(1:ninc) = X(1:ninc)
 
-        deallocate(AF, R, C, B, X, ferr, berr, ipiv_ex,work,iwork)
-        !end gemini contribution.
+          deallocate(AF, R, C, B, X, ferr, berr, ipiv_ex,work,iwork)
+          !end gemini contribution.
 
-    else
+      else
 
-        allocate(ipiv(n))
-        call dgesv(ninc, 1, Q, n, ipiv, Qcol1, nlev, info)
-        deallocate(ipiv)
+          allocate(ipiv(n))
+          call dgesv(ninc, 1, Q, n, ipiv, Qcol1, nlev, info)
+          deallocate(ipiv)
 
-    end if
+      end if
 
-    if (info /= 0) then
-        write(*,'(A,I4)') 'ERROR: solver failed, info = ', info
-        ierr = info
-        return
-    end if
+      if (info /= 0) then
+          write(*,'(A,I4)') 'ERROR: solver failed, info = ', info
+          ierr = info
+          return
+      end if
 
-    do i = ninc, 1, -1
-        Qcol1(i+1) = Qcol1(i)
-    end do
-    Qcol1(1) = 1.0_f64
-    Qcol1    = Qcol1 / sum(Qcol1)
+      do i = ninc, 1, -1
+          Qcol1(i+1) = Qcol1(i)
+      end do
+      Qcol1(1) = 1.0_f64
+      Qcol1    = Qcol1 / sum(Qcol1)
 
-    if (any(Qcol1 < 0.0_f64)) then
-        stop ' negative pops - numerical stability '
-    end if
+      if (any(Qcol1 < 0.0_f64)) then
+          stop ' negative pops - numerical stability '
+      end if
 
-end subroutine solve_cr_populations_axb
+  end subroutine solve_cr_populations_axb
 
 
   subroutine calculate_total_radiative_cascade(nlev,ntran,avals,cascade)
@@ -350,9 +442,6 @@ end subroutine solve_cr_populations_axb
 
     if (fractionOverride > 0.0_f64) denslocal = fractionOverride * electron_density_local
     print*,'atomic number density', denslocal,'cm-3 from new routine. edense=', electron_density_local
-
-    !write(0,*) denslocal,'yes',expansion_volume,piFourOnThree,velocity_outer,time_exp_sec
-
   end subroutine 
     
   subroutine sobolev_escape(nlev,ntran,baseAvals,sobesc,time_exp_days,pops,weights,wl_cm_cubed,atomicDensityLocal)
