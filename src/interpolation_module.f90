@@ -2,6 +2,7 @@ module interpolation_module
    use types
    use constants_module
    use atomicdata_module
+   use readadf04_module,only: upperTriangleIndexing
    implicit none
 contains
 
@@ -22,7 +23,7 @@ contains
       else 
          qrateup = 0.0_f64 
       end if 
-      qdown = qratedown / gu
+      qratedown = qratedown / gu
 
    end subroutine
 
@@ -38,6 +39,8 @@ contains
       real(f64) :: log_temp_req
       real(f64) :: yy(numTemps + 1)
       integer  :: ii,jj,tt
+
+      !integer :: pp 
 
       !
       ! Safety check
@@ -68,6 +71,10 @@ contains
             call spline(log_temps_adf04, ups(:, tt), numTemps,     0.0d0, 0.0d0, yy)
             call splint(log_temps_adf04, ups(:, tt), yy, numTemps, log_temp_req, upsinterp)
             call qrates_from_ups(qup(tt), qdown(tt), upsinterp,gi,gj,ei,ej,roottemp,KT)
+            !pp = upperTriangleIndexing(ii,jj,numLevels)
+            !write(0,*) qup(tt), qdown(tt)
+            tt = tt+1
+
          end do 
 
       end do
