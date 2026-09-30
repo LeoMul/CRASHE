@@ -1,38 +1,75 @@
 module interpolation_module
    use types
+   use constants_module
+   use atomicdata_module
    implicit none
 contains
-   subroutine interpolate_upsilons(ntran, ntemps_adf04, temps_adf04, temp_req, ups_adf04, ups_interp)
-      implicit none
-      integer :: ntran
-      integer :: ntemps_adf04
-      real(f64):: ups_adf04(ntemps_adf04, ntran)
-      real(f64):: ups_interp(ntran)
-      real(f64):: temps_adf04(ntemps_adf04)
-      real(f64):: temp_req
 
+   subroutine qrates_from_ups(qrateup,qratedown,upsilon, gl, gu, el, eu, sqrttemp,kT)
+      implicit none 
+      real(f64),intent(in)   :: upsilon,gl,gu,el,eu,sqrttemp,kt
+      real(f64),intent(out)  :: qrateup,qratedown
+      
+      real(f64) :: xx 
+      xx = (eu - el) / kT
+
+      qratedown = coll_fac * upsilon / sqrttemp
+
+      if (xx < 0.20_f64) then 
+         qrateup = qratedown * (1.0 - xx) / gl 
+      else if (xx < 700.0_f64) then 
+         qrateup = qratedown * exp(-xx) /  gl 
+      else 
+         qrateup = 0.0_f64 
+      end if 
+      qdown = qratedown / gu
+
+   end subroutine
+
+   subroutine interpolate_upsilons_calc_rates(temp_req)
+      implicit none
+      real(f64) :: temp_req
+      real(f64) :: upsinterp
+      real(f64) :: ei,ej,gi,gj
+      real(f64) :: roottemp 
+      real(f64) :: KT
       !local Variables
-      real(f64) :: log_temps_adf04(ntemps_adf04)
+      real(f64) :: log_temps_adf04(numTemps)
       real(f64) :: log_temp_req
-      real(f64) :: yy(ntemps_adf04 + 1)
-      integer  :: ii
+      real(f64) :: yy(numTemps + 1)
+      integer  :: ii,jj,tt
 
       !
       ! Safety check
-      if (temp_req < minval(temps_adf04)) then
+      if (temp_req < minval(temps)) then
          stop ' Requested temperature below minimum adf04 temperature.'
       end if
-      if (temp_req > maxval(temps_adf04)) then
+      if (temp_req > maxval(temps)) then
          stop ' Requested temperature above maximum adf04 temperature.'
       end if
       !
+
+      if (.not. allocated(qup))   allocate(qup(ntran))
+      if (.not. allocated(qdown)) allocate(qdown(ntran))
+
       !Take logs for easier interpolation
-      log_temps_adf04 = log10(temps_adf04)
+      log_temps_adf04 = log10(temps)
       log_temp_req = log10(temp_req)
 
-      do ii = 1, ntran
-         call spline(log_temps_adf04, ups_adf04(:, ii), ntemps_adf04, 0.0d0, 0.0d0, yy)
-         call splint(log_temps_adf04, ups_adf04(:, ii), yy, ntemps_adf04, log_temp_req, ups_interp(ii))
+      KT = kB_eV * temp_req
+      roottemp = sqrt(temp_req)
+      tt = 1 
+      do ii = 1, numLevels-1
+         gi = statweight(ii)
+         ei = energies(ii)
+         do jj = ii+1, numLevels
+            gj = statweight(jj)
+            ej = energies(jj)
+            call spline(log_temps_adf04, ups(:, tt), numTemps,     0.0d0, 0.0d0, yy)
+            call splint(log_temps_adf04, ups(:, tt), yy, numTemps, log_temp_req, upsinterp)
+            call qrates_from_ups(qup(tt), qdown(tt), upsinterp,gi,gj,ei,ej,roottemp,KT)
+         end do 
+
       end do
 
    end subroutine
@@ -104,4 +141,4 @@ contains
                return
             END SUBROUTINE
 
-            end module interpolation_module
+end module interpolation_module

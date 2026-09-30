@@ -4,8 +4,12 @@ module readadf04_module
    !in doing that - there is an AI generated routine for getting the van-regemorter collision strengths.
    use types
    use input, only: adfreadflag
+   use atomicdata_module
 contains
-   subroutine readadf04(filepath, numlevels, numtemps, ups, aval, statweight, energies, temps, wl_cm, wl_cm_cubed, atomicNumber, iq)
+   subroutine readadf04(filepath)
+      ! Reads an adf04 file into the module variables of adf04_module
+      ! (numLevels, numTemps, ntran, ups, aval, statweight, energies, temps,
+      ! wl_cm, wl_cm_cubed, atomicNumber, ioncharge_plus).
 
       !this routine is horribly slow. The scientific notation format
       !within these files is very hard to parse.
@@ -17,7 +21,6 @@ contains
 
       character(len=*)  :: filepath
       logical           :: ex
-      integer           :: numLevels, numtemps
       !local variables
       character*320       :: templine
       integer             :: yy, zz, ii, jj, offset, lower, upper
@@ -26,18 +29,14 @@ contains
       character*1         :: dummy2
 
       !
-      real(f64), allocatable :: temps(:), logTemp(:)
-      real(f64), allocatable :: ups(:, :)
-      real(f64), allocatable :: aval(:)
-      real(f64), allocatable :: statweight(:)
-      real(f64), allocatable :: energies(:)
+      real(f64), allocatable :: logTemp(:)
       real(f64), allocatable :: energiesTemp(:)
       real(f64), allocatable :: statweightTemp(:)
-      real(f64), allocatable :: tempsTemp(:), wl_cm(:), wl_cm_cubed(:)
+      real(f64), allocatable :: tempsTemp(:)
       integer             :: pp
       integer :: maxNumTransitions, iostat
       character*2 :: iel, IONTRM
-      integer :: iq, atomicNumber, iq1
+      integer :: iq1
       real(f64) :: fipot
       character*10 :: transitionFormat = '(2I4,A300)'
       character*22 :: levelFormat = '(I5,24X,f4.1,1x,f21.4)'
@@ -58,9 +57,9 @@ contains
       open (1, file=filepath)
       !Borrowed from Martin O'Mullane
 571   FORMAT(A2, 1X, I2, 2I10, F15.0, 1X, A2, 1X)
-      READ (1, 571) IEL, IQ, atomicNumber, IQ1, FIPOT, IONTRM          !GET HEADER
+      READ (1, 571) IEL, ioncharge_plus, atomicNumber, IQ1, FIPOT, IONTRM          !GET HEADER
       open (20, file='chargequick')
-      write (20, *) IEL, iq
+      write (20, *) IEL, ioncharge_plus
       close (20)
       !read (1,'(A320)') templine
       !print*,templine
@@ -78,6 +77,7 @@ contains
          if (yy .eq. -1) exit
       end do
       numLevels = ii - 1
+      ntran = (numLevels*(numLevels - 1))/2
       maxNumTransitions = (numLevels*(numLevels + 1))/2
       !print*,'Found ',ii-1,' atomic levels in file 1.'
 
@@ -296,23 +296,19 @@ contains
 
    end subroutine
 
-   subroutine readhack(filepath, numlevels, numtemps, ups, aval, statweight, energies, temps, wl_cm, wl_cm_cubed, atomicNumber, iq)
+   subroutine readhack(filepath)
+      ! Hacked reader (Floers data); fills the module variables of atomicdata_module.
       implicit none
-      integer           :: numLevels, numtemps, maxNumTransitions
+      integer           :: maxNumTransitions
       character(len=*)  :: filepath
 
-      integer :: atomicNumber, iq, pp, iostat, iallowed
+      integer :: pp, iostat, iallowed
 
-      real(f64), allocatable :: temps(:)
-      real(f64), allocatable :: ups(:, :), ei, ej
-      real(f64), allocatable :: aval(:)
-      real(f64), allocatable :: statweight(:)
-      real(f64), allocatable :: energies(:)
+      real(f64) :: ei, ej
 
-      real(f64), allocatable :: wl_cm(:), wl_cm_cubed(:)
       real(f64) :: av
       integer :: ii, jj, kk, ll
-      iq = 0
+      ioncharge_plus = 0
       atomicNumber = 98
       numTemps = 2
       allocate (temps(numtemps))
@@ -322,6 +318,7 @@ contains
 
       open (98, file='energies.dat')
       read (98, *) numLevels
+      ntran = (numLevels*(numLevels - 1))/2
 
       maxNumTransitions = (numLevels*(numLevels + 1))/2
       !write(0,*) maxNumTransitions

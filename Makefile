@@ -1,82 +1,111 @@
-# --- Compiler and Tools ---
+# ---------------------------------------------------------------------------
+# Makefile for crashe (colrad / CRM code)
+#
+#   make            release build  -> bin/crashe
+#   make debug      debug build    -> bin/crashe_debug
+#   make test       release build, then python3 test.py
+#   make clean      remove obj/ and bin/
+#   make -j         parallel builds are safe
+#
+# Release and debug objects live in separate directories (obj/release,
+# obj/debug), so switching between them never reuses stale objects.
+#
+# Module dependencies are generated automatically from the `use` statements
+# in src/*.f90 (see "Dependencies" below), so adding a module or a `use` line
+# needs no Makefile edit. The one convention this relies on is that a module
+# lives in a file of the same name: module foo  ->  src/foo.f90
+# ---------------------------------------------------------------------------
+
+# --- Compiler and tools ------------------------------------------------------
 FC       := gfortran
 MKDIR_P  := mkdir -p
 RM       := rm -rf
 
-# --- Paths ---
+# --- Build type --------------------------------------------------------------
+BUILD    ?= release
+
+# --- Paths -------------------------------------------------------------------
 SRCDIR   := src
-OBJDIR   := obj
+OBJDIR   := obj/$(BUILD)
 BINDIR   := bin
 
-# --- Flags ---
-# Using immediate assignment (:=) for performance
-BASE_FFLAGS := -fopenmp -J$(OBJDIR) -I$(OBJDIR)
-RELEASE_FLG := -O3 -fbacktrace -fcheck=all -g -Warray-temporaries 
-DEBUG_FLG   := -Og -g -Wall -Wextra -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow -Warray-temporaries
+# --- Flags -------------------------------------------------------------------
+# -ffree-line-length-none: several source lines exceed gfortran's default
+# 132-character limit, which is a hard error by default.
+BASE_FFLAGS := -fopenmp -ffree-line-length-none -J$(OBJDIR) -I$(OBJDIR)
+RELEASE_FLG := -O3 -fbacktrace -fcheck=all -g -Warray-temporaries
+DEBUG_FLG   := -Og -g -Wall -Wextra -fcheck=all -fbacktrace \
+               -ffpe-trap=invalid,zero,overflow -Warray-temporaries
 
-# Set default FFLAGS to Release
-FFLAGS      := $(BASE_FFLAGS) $(RELEASE_FLG)
-LDFLAGS     := -llapack -lblas
+ifeq ($(BUILD),release)
+  MODE_FLAGS := $(RELEASE_FLG)
+  SUFFIX     :=
+else ifeq ($(BUILD),debug)
+  MODE_FLAGS := $(DEBUG_FLG)
+  SUFFIX     := _debug
+else
+  $(error BUILD must be 'release' or 'debug', got '$(BUILD)')
+endif
 
-# --- Files ---
-TARGET      := $(BINDIR)/crashe
-SRCS        := $(wildcard $(SRCDIR)/*.f90)
-OBJS        := $(SRCS:$(SRCDIR)/%.f90=$(OBJDIR)/%.o)
+FFLAGS   := $(BASE_FFLAGS) $(MODE_FLAGS)
+LDFLAGS  := -llapack -lblas
 
-# --- Rules ---
-.PHONY: all clean debug dirs
+# --- Files -------------------------------------------------------------------
+TARGET   := $(BINDIR)/crashe$(SUFFIX)
+SRCS     := $(wildcard $(SRCDIR)/*.f90)
+OBJS     := $(SRCS:$(SRCDIR)/%.f90=$(OBJDIR)/%.o)
+DEPFILE  := $(OBJDIR)/deps.mk
 
-all: dirs $(TARGET)
+# --- Rules -------------------------------------------------------------------
+.PHONY: all debug test clean
 
-debug: FFLAGS := $(BASE_FFLAGS) $(DEBUG_FLG)
-debug: dirs $(TARGET)
+all: $(TARGET)
 
-dirs:
-	@$(MKDIR_P) $(OBJDIR) $(BINDIR)
+debug:
+	$(MAKE) BUILD=debug
 
-$(TARGET): $(OBJS)
+$(TARGET): $(OBJS) | $(BINDIR)
 	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.f90
+# Order-only prerequisites (after the |): the directory must exist, but its
+# timestamp never triggers a rebuild. Safe under make -j.
+$(OBJDIR) $(BINDIR):
+	@$(MKDIR_P) $@
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.f90 | $(OBJDIR)
 	$(FC) $(FFLAGS) -c $< -o $@
-##	fprettify $<
 
-# --- Dependency Tree ---
-# Simplified: only list what actually "USEs" what.
-$(OBJDIR)/periodic_table.o:   $(OBJDIR)/types.o
+# --- Dependencies ------------------------------------------------------------
+# For every src/foo.f90, emit   obj/<build>/foo.o: obj/<build>/bar.o ...
+# for each `use bar` that has a matching src/bar.f90. Intrinsic modules
+# (iso_fortran_env, omp_lib, ...) have no source file and are skipped, as is a
+# file "using" itself. Module names are case-insensitive, hence the tr.
+# Compiling a file writes its .mod alongside its .o, so depending on the
+# .o of each used module is enough to get the order (and rebuilds) right.
+$(DEPFILE): $(SRCS) | $(OBJDIR)
+	@echo "Generating $@"
+	@for f in $(SRCS); do \
+	  b=$$(basename $$f .f90); \
+	  mods=$$(grep -i -E '^[[:space:]]*use[[:space:]]+[a-z0-9_]+' $$f \
+	          | tr 'A-Z' 'a-z' \
+	          | sed -E 's/^[[:space:]]*use[[:space:]]+([a-z0-9_]+).*/\1/' \
+	          | sort -u); \
+	  deps=""; \
+	  for m in $$mods; do \
+	    if [ "$$m" != "$$b" ] && [ -f $(SRCDIR)/$$m.f90 ]; then \
+	      deps="$$deps $(OBJDIR)/$$m.o"; \
+	    fi; \
+	  done; \
+	  echo "$(OBJDIR)/$$b.o:$$deps"; \
+	done > $@
 
-$(OBJDIR)/input.o:   $(OBJDIR)/types.o
+ifneq ($(MAKECMDGOALS),clean)
+-include $(DEPFILE)
+endif
 
-$(OBJDIR)/constants_module.o: $(OBJDIR)/types.o
-
-$(OBJDIR)/plasma_module.o:    $(OBJDIR)/types.o \
-                              $(OBJDIR)/readadf04_module.o \
-                              $(OBJDIR)/periodic_table.o
-
-$(OBJDIR)/readadf04_module.o: $(OBJDIR)/types.o \
-                              $(OBJDIR)/interpolation_module.o \
-                              $(OBJDIR)/input.o 
-
-$(OBJDIR)/crm_module.o:       $(OBJDIR)/types.o \
-                              $(OBJDIR)/constants_module.o \
-                              $(OBJDIR)/interpolation_module.o \
-                              $(OBJDIR)/readadf04_module.o    \
-                              $(OBJDIR)/plasma_module.o \
-                              $(OBJDIR)/sorting.o
-
-$(OBJDIR)/colradfort.o:       $(OBJDIR)/crm_module.o \
-                              $(OBJDIR)/input.o 
-
-$(OBJDIR)/onion_module.o:     $(OBJDIR)/colradfort.o
-
-
-$(OBJDIR)/main.o:             $(OBJDIR)/colradfort.o\
-                              $(OBJDIR)/onion_module.o
-
+# --- Housekeeping ------------------------------------------------------------
 clean:
-	$(RM) $(OBJDIR) $(BINDIR)
-
-.PHONY: test
+	$(RM) obj $(BINDIR)
 
 test: all
 	python3 test.py

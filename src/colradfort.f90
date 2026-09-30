@@ -1,6 +1,7 @@
 module colradfort
 !module to pretty much call everything.
    use types
+   use atomicdata_module      ! the atomic data (numLevels, ntran, ups, aval, energies, ...)
    use readadf04_module
    use crm_module
    use interpolation_module
@@ -14,20 +15,15 @@ module colradfort
    use sorting
    implicit none
    integer                                :: thrid
-   integer                                :: numlevels, numtemps, ntran, ierr, i, numTempsReq
+   integer                                :: ierr, i, numTempsReq
    real(f64)                        :: temp
    real(f64)                        :: plt, pltnosob
    real(f64), allocatable :: tempsReq(:)
-   real(f64), allocatable :: temps(:)
-   real(f64), allocatable :: ups(:, :)
    real(f64), allocatable :: upsInterp(:)
-   real(f64), allocatable :: aval(:), cascade(:)
-   real(f64), allocatable :: statweight(:)
-   real(f64), allocatable :: energies(:)
+   real(f64), allocatable :: cascade(:)
    real(f64), allocatable :: pec(:), crm(:, :), col1(:), pops_old(:), crmcont(:, :), popscont(:)
    real(f64), allocatable :: popcoronal(:)
    real(f64), allocatable :: popsnosob(:), pecnosob(:)
-   real(f64), allocatable :: wl_cm(:), wl_cm_cubed(:)
    real(f64), allocatable :: sob(:), sob_old(:)
    !
    real(f64), allocatable :: wavelengthforspectrum(:)
@@ -43,8 +39,6 @@ module colradfort
    real(f64)                        :: sob_change, beta_change, beta_change_old = 1.d6
    logical                                :: converged
    integer                                :: k, j, p, l, ll
-   integer                                :: atomicNumber
-   integer                                :: ioncharge_plus
    real(8) :: t1, t2
    character(len=300)        ::broadmodedefault = 'gaussian'
    integer*8                        :: shellnumtemp = 0
@@ -57,15 +51,12 @@ contains
       character(len=*) :: adf04Path
       call cpu_time(t1)
       if (floersHack) then
-         call readhack(trim(adf04Path), numLevels, numTemps, ups, aval, &
-                       statweight, energies, temps, wl_cm, wl_cm_cubed, atomicNumber, ioncharge_plus)
+         call readhack(trim(adf04Path))
       else
-         call readadf04(trim(adf04Path), numLevels, numTemps, ups, aval, &
-                        statweight, energies, temps, wl_cm, wl_cm_cubed, atomicNumber, ioncharge_plus)
+         call readadf04(trim(adf04Path))
       end if
       call cpu_time(t2)
       write (*, '(A,ES10.4,A)') '  [timing] adf04 read time                : ', t2 - t1, ' s'
-      ntran = (numLevels*(numLevels - 1))/2
    end subroutine
 
    subroutine getAtomicDensityLocal()
@@ -143,8 +134,7 @@ contains
       shellnumtemp = shellnumtemp + 1
       i = 1
 
-      call interpolate_upsilons(ntran, numTemps, temps, &
-                                temperature, ups, upsInterp)
+      call interpolate_upsilons_calc_rates(temperature)
       sob = 1.0_f64
 
       call cpu_time(t1)
@@ -304,8 +294,8 @@ contains
       tempsReq(1) = temperature
       allocate (crm_copy(numlevels - 1, numlevels - 1))
       sob = 1.0_f64
-      call interpolate_upsilons(ntran, numTemps, temps, &
-                                temperature, ups, upsInterp)
+      call interpolate_upsilons_calc_rates(temperature)
+
 
       call build_cr_matrix(numLevels, ntran, statweight, energies, &
                            upsInterp, aval, sob, tempsReq(1), density, crm, col1, ierr, writeoutrates)
@@ -352,7 +342,7 @@ contains
       open (90, file='contour.out')
 
       !get central estimate
-      call interpolate_upsilons(ntran, numTemps, temps, temperature, ups, upsInterp)
+      call interpolate_upsilons_calc_rates(temperature)
       call getmassestimate(temperature, density, mass_req, careful_la, writeoutrates, num_req, &
                            thislumo_per_ion, &
                            requiredLumo, &
@@ -392,7 +382,7 @@ contains
 
          !vary density
          do ii = 1, size(temperaturevary)
-            call interpolate_upsilons(ntran, numTemps, temps, temperaturevary(ii), ups, upsInterp)
+            call interpolate_upsilons_calc_rates(temperaturevary(ii))
             call getmassestimate(temperaturevary(ii), density, mass_req, careful_la, writeoutrates, num_req, &
                                  thislumo_per_ion, &
                                  requiredLumo, &
@@ -402,7 +392,7 @@ contains
 
          write (90, '(A)') '# dens vary'
 
-         call interpolate_upsilons(ntran, numTemps, temps, temperature, ups, upsInterp)
+         call interpolate_upsilons_calc_rates(temperature)
          do ii = 1, size(electronDensityLocalvary)
             call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req, careful_la, writeoutrates, num_req, &
                                  thislumo_per_ion, &
@@ -429,7 +419,7 @@ contains
          do jj = 1, size(temperaturevary), 10
             counterjj = counterjj + 1
             counterii = 0
-            call interpolate_upsilons(ntran, numTemps, temps, temperaturevary(jj), ups, upsInterp)
+      call interpolate_upsilons_calc_rates(temperaturevary(jj))
             do ii = 1, size(electronDensityLocalvary), 10
                counterii = counterii + 1
              call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req, careful_la, writeoutrates, num_req, &
@@ -490,7 +480,7 @@ contains
       write (88, '(1000ES10.3)') electronDensityLocalvary(:)
 
       do jj = 1, size(temperaturevary)
-         call interpolate_upsilons(ntran, numTemps, temps, temperaturevary(jj), ups, upsInterp)
+         call interpolate_upsilons_calc_rates(temperaturevary(jj))
          do ii = 1, size(electronDensityLocalvary)
             call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req, careful_la, writeoutrates, num_req, &
                                  thislumo_per_ion, &
@@ -551,21 +541,15 @@ contains
    end subroutine
 
    subroutine dealloc
+      call dealloc_atomicdata
       if (allocated(tempsReq)) deallocate (tempsReq)
-      if (allocated(temps)) deallocate (temps)
-      if (allocated(ups)) deallocate (ups)
       if (allocated(upsInterp)) deallocate (upsInterp)
-      if (allocated(aval)) deallocate (aval)
-      if (allocated(statweight)) deallocate (statweight)
-      if (allocated(energies)) deallocate (energies)
       if (allocated(crm)) deallocate (crm)
       if (allocated(col1)) deallocate (col1)
       if (allocated(pops_old)) deallocate (pops_old)
       if (allocated(popsnosob)) deallocate (popsnosob)
       if (allocated(pec)) deallocate (pec)
       if (allocated(pecnosob)) deallocate (pecnosob)
-      if (allocated(wl_cm)) deallocate (wl_cm)
-      if (allocated(wl_cm_cubed)) deallocate (wl_cm_cubed)
       if (allocated(sob)) deallocate (sob)
       if (allocated(sob_old)) deallocate (sob_old)
       if (allocated(wavelengthforspectrum)) deallocate (wavelengthforspectrum)
