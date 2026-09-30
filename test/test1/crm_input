@@ -11,4 +11,5 @@
  wlmax_nm               = 7000
  numwl                  = 2000
  mode ='astro'
+ writeoutrates = .true.
  &end 

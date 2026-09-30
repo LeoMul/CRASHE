@@ -138,13 +138,13 @@ contains
       sob = 1.0_f64
 
       call cpu_time(t1)
-      call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                           upsInterp, aval, sob, tempsReq(i), density, crm, col1, ierr, writeoutrates)
-      call solve_cr_populations_axb(numLevels, crm, numLevels, col1, ierr, careful_la)
+!      call build_cr_matrix(numLevels, ntran, statweight, energies, &
+!                           upsInterp, aval, sob, tempsReq(i), density, crm, col1, ierr, writeoutrates)
+!      call solve_cr_populations_axb(numLevels, crm, numLevels, col1, ierr, careful_la)
 !            allocate(crmcont(numlevels,numlevels))
 !            allocate(popscont(numlevels))
-!        call solve_cr_with_continuity(numLevels, ntran, statweight, energies, &
-!                                  upsInterp, aval, sob, tempsReq(i), density, crmcont, popscont, ierr)
+        call solve_cr_with_continuity(numLevels, ntran, statweight, energies, &
+                                  upsInterp, aval, sob, tempsReq(i), density, crm, col1, ierr)
 
       call BoltzmanPopulation(numlevels, statweight, energies, tempsReq(i), popcoronal)
 

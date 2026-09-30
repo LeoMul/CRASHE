@@ -97,42 +97,43 @@ contains
    end subroutine
 
    subroutine solve_cr_with_continuity(nlev, ntran, g, E, Ups, Aval, sob, Te, Ne, Q, pops, ierr)
+      use atomicdata_module, only: qup, qdown
       implicit none
-      integer, intent(in)  :: nlev, ntran
+      integer,   intent(in)  :: nlev, ntran
       real(f64), intent(in)  :: g(nlev)
       real(f64), intent(in)  :: E(nlev)
       real(f64), intent(in)  :: Ups(ntran)
       real(f64), intent(in)  :: Aval(ntran)
       real(f64), intent(in)  :: sob(ntran)
-
       real(f64), intent(in)  :: Ne
       real(f64), intent(in)  :: Te
+
       real(f64), intent(inout) :: Q(nlev, nlev)
-      real(f64), intent(out) :: pops(nlev)
+      real(f64), intent(out)   :: pops(nlev)
+      
       integer, allocatable   :: ipiv(:)
       integer, intent(out) :: ierr
-      integer  :: i, j, info
+      integer  :: info
+      integer :: ii,jj,kk
       real(f64) :: kT, sqrt_Te, dE, q_exc, q_deexc
       logical :: writeoutrates
       kT = kB_eV*Te
       sqrt_Te = sqrt(Te)
       Q(:, :) = 0.0_f64
-      do j = 2, nlev
-         do i = 1, j - 1
-            call cr_matrix_element(i, j, Q(i, j), Q(j, i))
-         end do
-
+      kk=1
+      do ii = 1, nlev-1
+         do jj = ii+1, nlev
+            Q(jj,ii) =  Q(jj,ii) + qup(kk)
+            Q(ii,jj) =  Q(ii,jj) + qdown(kk) + aval(kk) * sob(kk)
+            kk = kk + 1
+         end do 
       end do
-      do j = 1, nlev
-         Q(j, j) = -sum(Q(:, j))
+
+      do jj = 1, nlev
+         Q(jj, jj) = -sum(Q(:, jj))
       end do
 
       Q(1, :) = 1.0_f64
-
-      do j = 1, nlev
-         write (68, *) Q(:, j)
-      end do
-
       pops(:) = 0.0_f64
       pops(1) = 1.0_f64
 
