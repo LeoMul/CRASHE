@@ -23,11 +23,14 @@ contains
       real(f64) :: wl1
       real(f64) :: wl2
       integer   :: nwl
-      real(f64) :: atomicDensityLocal, numions
-      real(f64), allocatable :: currentspec(:)
       real(f64), allocatable :: totalspec(:)
       real(f64), allocatable :: wlarray(:)
-      character(len=300) :: broadmode
+      ! input / colradfort module variables that onion overrides per shell;
+      ! saved here and restored after the loop so onion has no side effects.
+      real(f64)          :: temperature_save, density_save, time_save, vel_save
+      real(f64)          :: mass_save, fraction_save
+      logical            :: careful_la_save, writeoutrates_save
+      character(len=300) :: broadmode_save
       !velocity law:
       v_min = 0.04_f64
       v_max = 0.30_f64
@@ -37,7 +40,6 @@ contains
       wl1 = wlmin_nm
       wl2 = wlmax_nm
       nwl = numwl
-      allocate (currentspec(nwl))
       allocate (totalspec(nwl))
       allocate (wlarray(nwl))
 
@@ -110,35 +112,55 @@ contains
          wlarray(s) = wlarray(s - 1) + dwl
       end do
 
-      broadmode(1:3) = 'box'
+      temperature_save   = temperature
+      density_save       = density
+      time_save          = timeSinceExplosionDays
+      vel_save           = velocityExpansionC
+      careful_la_save    = careful_la
+      writeoutrates_save = writeoutrates
+      broadmode_save     = broadmodedefault
+      mass_save          = massElementSolar
+      fraction_save      = fractionOverride
+
+      broadmodedefault = 'box'
 
       do s = 1, numshells
 
-            call getAtomicDensityLocal(atomicDensityLocal, numions, shell_mass(s), atomicNumber,v_bounds_c(s+1),v_bounds_c(s),0.0_f64,29.0_f64,shell_electron_density(s) )
+         ! set the module variables that getAtomicDensityLocal and colrad read for this shell
+         massElementSolar       = shell_mass(s)
+         shellVelocityOuterC    = v_bounds_c(s + 1)
+         shellVelocityInnerC    = v_bounds_c(s)
+         fractionOverride       = 0.0_f64
+         temperature            = 3000.0_f64
+         density                = shell_electron_density(s)
+         timeSinceExplosionDays = 29.0_f64
+         careful_la             = .false.
+         writeoutrates          = .false.
+         velocityExpansionC     = shell_v_centers(s)
+         ! sobolev, wlmin_nm, wlmax_nm and numwl are used as read from input
 
-         call colrad(3000.0_f64, &
-                     shell_electron_density(s), &
-                     sobolev, &
-                     29.0_f64, &
-                     atomicDensityLocal, &
-                     wl1, &
-                     wl2, &
-                     nwl, &
-                     .false., &
-                     .false., &
-                     shell_v_centers(s), &
-                     wlarray, &
-                     currentspec, &
-                     numions, &
-                     broadmode &
-                     )
-         write (0, *) broadmode(1:3)
-         totalspec(:) = totalspec(:) + currentspec
+         call getAtomicDensityLocal
+         call colrad
+         write (0, *) broadmodedefault(1:3)
+         totalspec(:) = totalspec(:) + broadspec(:)
          !call colrad  !with a flag to do the box instead.
          !add spectra to  full spectra?
          !output?
 
       end do
+      temperature            = temperature_save
+      density                = density_save
+      timeSinceExplosionDays = time_save
+      velocityExpansionC     = vel_save
+      careful_la             = careful_la_save
+      writeoutrates          = writeoutrates_save
+      broadmodedefault       = broadmode_save
+      massElementSolar       = mass_save
+      fractionOverride       = fraction_save
+
+      ! colrad fills the wavelength grid (in cm) in wavelengthforspectrum
+      wlarray(:) = wavelengthforspectrum(:)
+
       open (101, file='spectrum')
       do j = 1, nwl
          if (totalspec(j) > 0) then
@@ -146,7 +168,6 @@ contains
          end if
       end do
       close (101)
-      deallocate (currentspec)
       deallocate (totalspec)
       deallocate (wlarray)
    end subroutine

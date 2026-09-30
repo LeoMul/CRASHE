@@ -406,34 +406,6 @@ contains
 
    end subroutine
 
-   subroutine getAtomicDensityLocal(denslocal, &
-                                    numIonsLocal, &
-                                    ionMassSolar, &
-                                    atomicnumber, &
-                                    velocity_outer, &
-                                    velocity_inner, &
-                                    fractionOverride, &
-                                    time_exp_days, &
-                                    electron_density_local)
-      implicit none
-      real(f64) :: denslocal, ionMassSolar, velocity_outer, velocity_inner, fractionOverride, time_exp_days
-      real(f64)  :: expansion_volume, time_exp_sec, electron_density_local, numIonsLocal
-      integer :: atomicnumber
-      real(f64), parameter :: c_cgs = 3e10_f64
-
-      time_exp_sec = time_exp_days*86400.0_f64
-
-      !total volume.
-      expansion_volume = piFourOnThree*(velocity_outer*c_cgs*time_exp_sec)**3
-      expansion_volume = expansion_volume - piFourOnThree*(velocity_inner*c_cgs*time_exp_sec)**3
-      numIonsLocal = ionMassSolar*m_solar_grams/get_mass_grams(atomicnumber)
-
-      denslocal = numIonsLocal/(expansion_volume)
-
-      if (fractionOverride > 0.0_f64) denslocal = fractionOverride*electron_density_local
-      print *, 'atomic number density', denslocal, 'cm-3 from new routine. edense=', electron_density_local
-   end subroutine
-
    subroutine sobolev_escape(nlev, ntran, baseAvals, sobesc, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)
       !calculates Sobolev escape probability.
       implicit none
