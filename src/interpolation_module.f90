@@ -71,6 +71,11 @@ contains
             call spline(log_temps_adf04, ups(:, tt), numTemps,     0.0d0, 0.0d0, yy)
             call splint(log_temps_adf04, ups(:, tt), yy, numTemps, log_temp_req, upsinterp)
             call qrates_from_ups(qup(tt), qdown(tt), upsinterp,gi,gj,ei,ej,roottemp,KT)
+
+            !it will be better actually to have a single Q array
+            !with Q(i,j) = i -> j and Q(j,i) j -> i and diagonals the loss terms
+            !will allow for more efficient construction of the CRM later...
+
             !pp = upperTriangleIndexing(ii,jj,numLevels)
             !write(0,*) qup(tt), qdown(tt)
             tt = tt+1

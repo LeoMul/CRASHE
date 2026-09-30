@@ -96,29 +96,20 @@ contains
 
    end subroutine
 
-   subroutine solve_cr_with_continuity(nlev, ntran, g, E, Ups, Aval, sob, Te, Ne, Q, pops, ierr)
+   subroutine solve_cr_with_continuity(nlev, ntran, Aval, sob, Q, pops, ierr)
       use atomicdata_module, only: qup, qdown
       implicit none
       integer,   intent(in)  :: nlev, ntran
-      real(f64), intent(in)  :: g(nlev)
-      real(f64), intent(in)  :: E(nlev)
-      real(f64), intent(in)  :: Ups(ntran)
       real(f64), intent(in)  :: Aval(ntran)
       real(f64), intent(in)  :: sob(ntran)
-      real(f64), intent(in)  :: Ne
-      real(f64), intent(in)  :: Te
 
       real(f64), intent(inout) :: Q(nlev, nlev)
       real(f64), intent(out)   :: pops(nlev)
       
       integer, allocatable   :: ipiv(:)
       integer, intent(out) :: ierr
-      integer  :: info
       integer :: ii,jj,kk
-      real(f64) :: kT, sqrt_Te, dE, q_exc, q_deexc
-      logical :: writeoutrates
-      kT = kB_eV*Te
-      sqrt_Te = sqrt(Te)
+
       Q(:, :) = 0.0_f64
       kk=1
       do ii = 1, nlev-1
@@ -133,50 +124,15 @@ contains
          Q(jj, jj) = -sum(Q(:, jj))
       end do
 
-      Q(1, :) = 1.0_f64
+      Q(1, :) = 1.0_f64 ! replace first row with continuity.
+                        !this is easier to maintain than the old version.
       pops(:) = 0.0_f64
       pops(1) = 1.0_f64
 
       allocate (ipiv(nlev))
-      call dgesv(nlev, 1, Q, nlev, ipiv, pops, nlev, info)
-      write (69, *) info, pops
+      call dgesv(nlev, 1, Q, nlev, ipiv, pops, nlev, ierr)
+!      write (69, *) info, pops
       deallocate (ipiv)
-
-   contains
-
-      subroutine cr_matrix_element(iii, jjj, cij, cji)
-         implicit none
-         integer, intent(in)    :: iii, jjj
-         real(f64), intent(inout) :: cij, cji
-         integer :: pp
-
-         pp = upperTriangleIndexing(iii, jjj, nlev)
-         dE = E(jjj) - E(iii)
-
-         !q_deexc = (coll_fac / (g(jjj) * sqrt_Te)) * Ups(pp)
-
-         q_deexc = coll_fac*Ups(pp)/sqrt_Te
-         !
-         if (de/kT < 0.20_f64) then
-            q_exc = q_deexc*(1.0_f64 - dE/kT)/g(iii)
-         else if (dE/kT < 700.0_f64) then
-            q_exc = q_deexc*exp(-dE/kT)/g(iii)
-         else
-            q_exc = 0.0_f64
-         end if
-!
-         q_deexc = q_deexc/g(jjj)
-!  
-         q_exc   = qup(pp)
-         q_deexc = qdown(pp)
-         cji = cji + Ne*q_exc
-         cij = cij + Ne*q_deexc + Aval(pp)*sob(pp)
-
-         if (writeoutrates) then
-            write (900, '(2I6,6ES10.3)') iii, jjj, Ups(pp), q_exc, q_deexc, Aval(pp), sob(pp), Aval(pp)*sob(pp)
-         end if
-
-      end subroutine cr_matrix_element
 
    end subroutine
 
