@@ -39,11 +39,15 @@ $(TARGET): $(OBJS)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.f90
 	$(FC) $(FFLAGS) -c $< -o $@
+##	fprettify $<
 
 # --- Dependency Tree ---
 # Simplified: only list what actually "USEs" what.
 $(OBJDIR)/periodic_table.o:   $(OBJDIR)/types.o
+
 $(OBJDIR)/input.o:   $(OBJDIR)/types.o
+
+$(OBJDIR)/constants_module.o: $(OBJDIR)/types.o
 
 $(OBJDIR)/plasma_module.o:    $(OBJDIR)/types.o \
                               $(OBJDIR)/readadf04_module.o \
@@ -54,6 +58,7 @@ $(OBJDIR)/readadf04_module.o: $(OBJDIR)/types.o \
                               $(OBJDIR)/input.o 
 
 $(OBJDIR)/crm_module.o:       $(OBJDIR)/types.o \
+                              $(OBJDIR)/constants_module.o \
                               $(OBJDIR)/interpolation_module.o \
                               $(OBJDIR)/readadf04_module.o    \
                               $(OBJDIR)/plasma_module.o \
