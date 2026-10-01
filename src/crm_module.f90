@@ -109,22 +109,14 @@ contains
 
    end subroutine
 
-   subroutine solve_cr_with_continuity(nlev, density, Q, pops, ierr)
+   subroutine     build_crm(nlev, density, Q)
       implicit none
-      integer,   intent(in)  :: nlev
-      !real(f64), intent(in)  :: Aval(ntran)
-      !real(f64), intent(in)  :: sob(ntran)
+      integer,   intent(in)    :: nlev
       real(f64)                :: density
       real(f64), intent(inout) :: Q(nlev, nlev)
-      real(f64), intent(out)   :: pops(nlev)
-      
-      integer, intent(out) :: ierr
       integer :: ii,jj,kk
 
-      
-
       Q(:,:)  = density * qmatrix(:,:)
-
       kk=1
       do ii = 1, nlev-1
          do jj = ii+1, nlev
@@ -135,20 +127,44 @@ contains
             kk = kk + 1
          end do 
       end do
-
+!
       !enforce loss conservation...
       do jj = 1, nlev
          Q(jj, jj) = -sum(Q(:, jj))
       end do
 
+   end subroutine build_crm
+
+   subroutine solve_cr_with_continuity(nlev, density, Q, pops, ierr,skipbuild,ninclude)
+      implicit none
+      integer,   intent(in)    :: nlev
+      real(f64)                :: density
+      real(f64), intent(inout) :: Q(nlev, nlev)
+      real(f64), intent(out)   :: pops(nlev)
+      
+      integer, intent(in), optional :: skipbuild,ninclude
+      integer :: skipbuildinternal = 0, nincludeInternal 
+      integer, intent(out) :: ierr
+      
+
+      !if the CRM for this case has already been built, for some reason.
+      if (present(skipbuild)) skipbuildinternal = skipbuild
+
+      if (skipbuildinternal == 0) then 
+         call build_crm(nlev, density, Q)
+      end if 
       ! replace first row with continuity
       !this is easier to maintain than the old version.
-      Q(1, :) = 1.0_f64 
-                        
+      Q(1, :) = 1.0_f64
       pops(:) = 0.0_f64
       pops(1) = 1.0_f64
-
-      call dgesv(nlev, 1, Q, nlev, ipiv, pops, nlev, ierr)
+!     
+!     If for some reason the user wants to override the number of levels
+!     actually included in the CRM.
+      nincludeInternal = nlev
+      if (present(ninclude)) nincludeInternal   = ninclude
+!
+      call dgesv(nincludeInternal, 1, Q, nlev, ipiv, pops, nlev, ierr)
 !      write (69, *) info, pops
    end subroutine
 

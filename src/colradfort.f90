@@ -273,24 +273,31 @@ contains
    end subroutine
 
    subroutine levelscan()
+      implicit none 
       ! Uses module variables temperature, density, careful_la, writeoutrates (from input).
       real(f64), allocatable :: crm_copy(:, :), col1_copy(:)
+
+      !if ( allocated(crm) ) deallocate(crm)
+      !allocate(crm(numlevels - 1, numlevels - 1))
+
+
       tempsReq(1) = temperature
-      allocate (crm_copy(numlevels - 1, numlevels - 1))
+      allocate (crm_copy(numlevels, numlevels))
       sob = 1.0_f64
       call interpolate_upsilons_calc_rates(temperature)
 
+      call build_crm(numLevels, density, crm)
 
-      call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                           upsInterp, aval, sob, tempsReq(1), density, crm, col1, ierr, writeoutrates)
+      !call build_cr_matrix(numLevels, ntran, statweight, energies, &
+      !                     upsInterp, aval, sob, tempsReq(1), density, crm, col1, ierr, writeoutrates)
 
       crm_copy(:, :) = crm(:, :)
       col1_copy = col1
       open (32, file='plt_level_convergence.dat')
       do i = 2, numlevels
 
-         call solve_cr_populations_axb(numLevels, crm, i, col1, ierr, careful_la)
-
+         !call solve_cr_populations_axb(numLevels, crm, i, col1, ierr, careful_la)
+         call solve_cr_with_continuity(numLevels, density, crm, col1, ierr, skipbuild=1,ninclude=i)
          call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, density, energies)
          write (32, *) i, plt, col1(2), col1(1)
 
@@ -316,7 +323,7 @@ contains
       real(f64) :: thislumo_per_ion
       real(f64) :: num_req, mass_req
       real(f64) :: num_in_one_solar_mass
-      integer :: ii, jj, counterii = 0, counterjj = 0
+      integer   :: ii, jj, counterii = 0, counterjj = 0
       real(f64) :: xx
 
       num_in_one_solar_mass = 1.0*m_solar_grams/get_mass_grams(atomicnumber)
@@ -327,7 +334,7 @@ contains
 
       !get central estimate
       call interpolate_upsilons_calc_rates(temperature)
-      call getmassestimate(temperature, density, mass_req, careful_la, writeoutrates, num_req, &
+      call getmassestimate(density, mass_req, num_req, &
                            thislumo_per_ion, &
                            requiredLumo, &
                            num_in_one_solar_mass)
@@ -367,7 +374,7 @@ contains
          !vary density
          do ii = 1, size(temperaturevary)
             call interpolate_upsilons_calc_rates(temperaturevary(ii))
-            call getmassestimate(temperaturevary(ii), density, mass_req, careful_la, writeoutrates, num_req, &
+            call getmassestimate(density, mass_req,  num_req, &
                                  thislumo_per_ion, &
                                  requiredLumo, &
                                  num_in_one_solar_mass)
@@ -378,7 +385,7 @@ contains
 
          call interpolate_upsilons_calc_rates(temperature)
          do ii = 1, size(electronDensityLocalvary)
-            call getmassestimate(temperature, electronDensityLocalvary(ii), mass_req, careful_la, writeoutrates, num_req, &
+            call getmassestimate(electronDensityLocalvary(ii), mass_req, num_req, &
                                  thislumo_per_ion, &
                                  requiredLumo, &
                                  num_in_one_solar_mass)
@@ -406,7 +413,7 @@ contains
       call interpolate_upsilons_calc_rates(temperaturevary(jj))
             do ii = 1, size(electronDensityLocalvary), 10
                counterii = counterii + 1
-             call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req, careful_la, writeoutrates, num_req, &
+             call getmassestimate(electronDensityLocalvary(ii), mass_req, num_req, &
                                     thislumo_per_ion, &
                                     requiredLumo, &
                                     num_in_one_solar_mass)
@@ -466,7 +473,7 @@ contains
       do jj = 1, size(temperaturevary)
          call interpolate_upsilons_calc_rates(temperaturevary(jj))
          do ii = 1, size(electronDensityLocalvary)
-            call getmassestimate(temperaturevary(jj), electronDensityLocalvary(ii), mass_req, careful_la, writeoutrates, num_req, &
+            call getmassestimate(electronDensityLocalvary(ii), mass_req, num_req, &
                                  thislumo_per_ion, &
                                  requiredLumo, &
                                  num_in_one_solar_mass)
@@ -479,11 +486,8 @@ contains
    end subroutine
 
    subroutine getmassestimate( &
-      reqtemp, &
       reqdens, &
       reqmass, &
-      careful_la, &
-      writeoutrates, &
       num_req, &
       thislumo_per_ion, &
       requiredLumo, &
@@ -494,13 +498,14 @@ contains
       real(f64) :: reqtemp, reqdens, reqmass
       logical :: careful_la, writeoutrates
       integer :: pp
-      call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                           upsInterp, aval, sob, reqtemp, reqdens, crm, col1, ierr, writeoutrates)
-      call solve_cr_populations_axb(numLevels, crm, numLevels, col1, ierr, careful_la)
+      call solve_cr_with_continuity(numLevels,reqdens, crm, col1, ierr)
       pp = upperTriangleIndexing(contourLower, contourUpper, numlevels)
       write (1414, *) '   The line in contour is: ', wl_cm(pp), aval(pp)
+
       thislumo_per_ion = col1(contourUpper)*aval(pp)*hc_ergcm/wl_cm(pp)
+
       num_req = requiredlumo/thislumo_per_ion
+
       reqmass = num_req/num_in_one_solar_mass
 
    end subroutine
