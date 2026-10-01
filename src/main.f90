@@ -8,9 +8,10 @@ program mycrm
 
    call getinput
 
-   call getadf04(adf04path, floersHack)
+   call getadf04
 
-   call alloc(numwl)
+   call alloc
+
    print *, mode
    if (mode .eq. 'astro') then
 

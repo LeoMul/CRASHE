@@ -1,6 +1,6 @@
 module constants_module 
     use types 
-    implicit none 
+implicit none 
    real(f64), parameter :: kB_eV = 8.617333262e-5_f64
    real(f64), parameter :: coll_fac = 8.629e-6_f64
    real(f64), parameter :: pi = 4.0_f64*atan(1.0_f64)

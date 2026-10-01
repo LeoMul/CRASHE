@@ -33,7 +33,7 @@ BINDIR   := bin
 # -ffree-line-length-none: several source lines exceed gfortran's default
 # 132-character limit, which is a hard error by default.
 BASE_FFLAGS := -fopenmp -ffree-line-length-none -J$(OBJDIR) -I$(OBJDIR)
-RELEASE_FLG := -O3 -fbacktrace -fcheck=all -g -Warray-temporaries
+RELEASE_FLG := -O3 
 DEBUG_FLG   := -Og -g -Wall -Wextra -fcheck=all -fbacktrace \
                -ffpe-trap=invalid,zero,overflow -Warray-temporaries
 

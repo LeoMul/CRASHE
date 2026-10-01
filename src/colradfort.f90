@@ -7,48 +7,42 @@ module colradfort
    use interpolation_module
    use plasma_module
    use omp_lib
-   use input, only: mode, contourLower, contourUpper, sortpec, &
-                    temperature, density, sobolev, timeSinceExplosionDays, &
-                    wlmin_nm, wlmax_nm, numwl, careful_la, writeoutrates, &
-                    velocityExpansionC, massElementSolar, fractionOverride, &
-                    requiredLumo, verbose
+   use input
    use sorting
    implicit none
-   integer                                :: thrid
-   integer                                :: ierr, i, numTempsReq
-   real(f64)                        :: temp
-   real(f64)                        :: plt, pltnosob
+   integer                :: thrid
+   integer                :: ierr, i, numTempsReq
+   real(f64)              :: temp
+   real(f64)              :: plt, pltnosob
    real(f64), allocatable :: tempsReq(:)
    real(f64), allocatable :: upsInterp(:)
    real(f64), allocatable :: cascade(:)
-   real(f64), allocatable :: pec(:), crm(:, :), col1(:), pops_old(:), crmcont(:, :), popscont(:)
+   real(f64), allocatable :: pec(:), crm(:, :), col1(:), pops_old(:)
    real(f64), allocatable :: popcoronal(:)
    real(f64), allocatable :: popsnosob(:), pecnosob(:)
-   real(f64), allocatable :: sob(:), sob_old(:)
+   real(f64), allocatable :: sob_old(:)
    !
    real(f64), allocatable :: wavelengthforspectrum(:)
    real(f64), allocatable :: broadspec(:)
    !
-   real(f64)                        :: atomicDensity, numions
+   real(f64)              :: atomicDensity, numions
    ! shell boundaries (in units of c) used by getAtomicDensityLocal
-   real(f64)                        :: shellVelocityOuterC = 0.0_f64, shellVelocityInnerC = 0.0_f64
-   real(f64)                        :: sob_damp = 0.5_f64
+   real(f64)              :: shellVelocityOuterC = 0.0_f64, shellVelocityInnerC = 0.0_f64
+   real(f64)              :: sob_damp = 0.5_f64
    real(f64), parameter   :: sob_tol = 1.0e-2_f64
-   integer, parameter   :: max_sob_iter = 9999
-   integer                                :: sob_iter
-   real(f64)                        :: sob_change, beta_change, beta_change_old = 1.d6
-   logical                                :: converged
-   integer                                :: k, j, p, l, ll
-   real(8) :: t1, t2
-   character(len=300)        ::broadmodedefault = 'gaussian'
-   integer*8                        :: shellnumtemp = 0
+   integer, parameter     :: max_sob_iter = 9999
+   integer                :: sob_iter
+   real(f64)              :: sob_change, beta_change, beta_change_old = 1.d6
+   logical                :: converged
+   integer                :: k, j, p, l, ll
+   real(f64)              :: t1, t2
+   character(len=300)     :: broadmodedefault = 'gaussian'
+   integer*8              :: shellnumtemp = 0
 
 contains
 
-   subroutine getadf04(adf04Path, floersHack)
+   subroutine getadf04
       implicit none
-      logical :: floershack
-      character(len=*) :: adf04Path
       call cpu_time(t1)
       if (floersHack) then
          call readhack(trim(adf04Path))
@@ -135,25 +129,19 @@ contains
       i = 1
 
       call interpolate_upsilons_calc_rates(temperature)
+
       sob = 1.0_f64
 
       call cpu_time(t1)
-!      call build_cr_matrix(numLevels, ntran, statweight, energies, &
-!                           upsInterp, aval, sob, tempsReq(i), density, crm, col1, ierr, writeoutrates)
-!      call solve_cr_populations_axb(numLevels, crm, numLevels, col1, ierr, careful_la)
-!            allocate(crmcont(numlevels,numlevels))
-!            allocate(popscont(numlevels))
-        call solve_cr_with_continuity(numLevels, ntran, statweight, energies, &
-                                  upsInterp, aval, sob, tempsReq(i), density, crm, col1, ierr)
+
+      call solve_cr_with_continuity(numLevels,density, crm, col1, ierr)
 
       call BoltzmanPopulation(numlevels, statweight, energies, tempsReq(i), popcoronal)
 
-      !do j = 1, numlevels
-      !   write (69, *) col1(j), popscont(j), popscont(j)/col1(j)
-      !end do
-      
       call cpu_time(t2)
+
       write (*, '(A,ES10.4,A)') '  [timing] initial populations : ', t2 - t1, ' s'
+      
       converged = .false.
       sob       = 1.0_f64
       sob_old   = 1.0_f64
@@ -172,22 +160,24 @@ contains
 
       if (sobolev) then
          popsnosob = col1
-         pecnosob = pec
-         pltnosob = plt
-         call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
+         pecnosob  = pec
+         pltnosob  = plt
+         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
                              statweight, wl_cm_cubed, atomicDensity)
 
          call cpu_time(t1)
          sob_iter_loop: do sob_iter = 1, max_sob_iter
-            call build_cr_matrix(numLevels, ntran, statweight, energies, &
-                                 upsInterp, aval, sob, tempsReq(i), density, crm, col1, ierr, writeoutrates)
-            call solve_cr_populations_axb(numLevels, crm, numLevels, col1, ierr, careful_la)
+
+            call solve_cr_with_continuity(numLevels,density, crm, col1, ierr)
+
+            write(0,*) maxval(col1 - popsnosob)
 
             sob_old = sob
 
-            call sobolev_escape(numLevels, ntran, aval, sob, timeSinceExplosionDays, col1, &
+            call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
                                 statweight, wl_cm_cubed, atomicDensity)
-            sob = sob_damp*sob + (1.0_f64 - sob_damp)*sob_old
+
+            sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
 
             !this is a fairly conservative convergence criterion - basically it asserts that
             !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
@@ -521,12 +511,11 @@ contains
 
    end subroutine
 
-   subroutine alloc(numwl)
+   subroutine alloc
       implicit none
-      integer :: numwl
       numTempsReq = 1
 
-      allocate (crm(numLevels - 1, numLevels - 1))
+      allocate (crm(numLevels, numLevels))
       allocate (col1(numLevels), pops_old(numLevels))
       allocate (tempsReq(numTempsReq))
       allocate (upsInterp(ntran))

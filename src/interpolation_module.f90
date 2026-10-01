@@ -52,12 +52,13 @@ contains
       end if
       !
 
-      if (.not. allocated(qup))   allocate(qup(ntran))
-      if (.not. allocated(qdown)) allocate(qdown(ntran))
+      !if (.not. allocated(qup))   allocate(qup(ntran))
+      !if (.not. allocated(qdown)) allocate(qdown(ntran))
+      if (.not. allocated(qmatrix))   allocate(qmatrix(numLevels,numLevels))
 
-      !Take logs for easier interpolation
+      !Take logs for more stable interpolation
       log_temps_adf04 = log10(temps)
-      log_temp_req = log10(temp_req)
+      log_temp_req    = log10(temp_req)
 
       KT = kB_eV * temp_req
       roottemp = sqrt(temp_req)
@@ -70,18 +71,10 @@ contains
             ej = energies(jj)
             call spline(log_temps_adf04, ups(:, tt), numTemps,     0.0d0, 0.0d0, yy)
             call splint(log_temps_adf04, ups(:, tt), yy, numTemps, log_temp_req, upsinterp)
-            call qrates_from_ups(qup(tt), qdown(tt), upsinterp,gi,gj,ei,ej,roottemp,KT)
-
-            !it will be better actually to have a single Q array
-            !with Q(i,j) = i -> j and Q(j,i) j -> i and diagonals the loss terms
-            !will allow for more efficient construction of the CRM later...
-
-            !pp = upperTriangleIndexing(ii,jj,numLevels)
-            !write(0,*) qup(tt), qdown(tt)
+            !jj > ii 
+            call qrates_from_ups(qmatrix(jj,ii), qmatrix(ii,jj), upsinterp,gi,gj,ei,ej,roottemp,KT)
             tt = tt+1
-
          end do 
-
       end do
 
    end subroutine

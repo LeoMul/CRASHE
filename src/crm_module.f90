@@ -14,7 +14,7 @@ module crm_module
    use constants_module
    use Periodic_Table
    use readadf04_module, only: upperTriangleIndexing
-   use atomicdata_module,only :qup,qdown
+   use atomicdata_module,only :qmatrix, aval,sob
    implicit none
 contains
 
@@ -85,7 +85,6 @@ contains
       do i = 2, nlev
          wi = g(i)
          dE = E(i) - E(1)
-
          boltzpop(i) = (wi/w1)*exp(-de/kt)
          !print*,boltzpop(i)
       end do
@@ -96,13 +95,12 @@ contains
 
    end subroutine
 
-   subroutine solve_cr_with_continuity(nlev, ntran, Aval, sob, Q, pops, ierr)
-      use atomicdata_module, only: qup, qdown
+   subroutine solve_cr_with_continuity(nlev, density, Q, pops, ierr)
       implicit none
-      integer,   intent(in)  :: nlev, ntran
-      real(f64), intent(in)  :: Aval(ntran)
-      real(f64), intent(in)  :: sob(ntran)
-
+      integer,   intent(in)  :: nlev
+      !real(f64), intent(in)  :: Aval(ntran)
+      !real(f64), intent(in)  :: sob(ntran)
+      real(f64)                :: density
       real(f64), intent(inout) :: Q(nlev, nlev)
       real(f64), intent(out)   :: pops(nlev)
       
@@ -110,22 +108,30 @@ contains
       integer, intent(out) :: ierr
       integer :: ii,jj,kk
 
-      Q(:, :) = 0.0_f64
+      
+
+      Q(:,:)  = density * qmatrix(:,:)
+
       kk=1
       do ii = 1, nlev-1
          do jj = ii+1, nlev
-            Q(jj,ii) =  Q(jj,ii) + qup(kk)
-            Q(ii,jj) =  Q(ii,jj) + qdown(kk) + aval(kk) * sob(kk)
+            !jj > ii 
+            !Q(jj,ii) =  Q(jj,ii) + density * qmatrix(jj,ii)
+            !Q(ii,jj) =  Q(ii,jj) + density * qmatrix(ii,jj) + aval(kk) * sob(kk)
+            Q(ii,jj) =  Q(ii,jj) + aval(kk) * sob(kk)
             kk = kk + 1
          end do 
       end do
 
+      !enforce loss conservation...
       do jj = 1, nlev
          Q(jj, jj) = -sum(Q(:, jj))
       end do
 
-      Q(1, :) = 1.0_f64 ! replace first row with continuity.
-                        !this is easier to maintain than the old version.
+      ! replace first row with continuity
+      !this is easier to maintain than the old version.
+      Q(1, :) = 1.0_f64 
+                        
       pops(:) = 0.0_f64
       pops(1) = 1.0_f64
 
@@ -227,11 +233,10 @@ contains
 !
          q_deexc = q_deexc/g(jjj)
 !
-         q_exc   = qup(pp)
-         q_deexc = qdown(pp)
+         q_exc   = qmatrix(jjj,iii)
+         q_deexc = qmatrix(iii,jjj)
          cji = cji + Ne*q_exc
          cij = cij + Ne*q_deexc + Aval(pp)*sob(pp)
-
          if (writeoutrates) then
             write (900, '(2I6,6ES10.3)') iii, jjj, Ups(pp), q_exc, q_deexc, Aval(pp), sob(pp), Aval(pp)*sob(pp)
          end if
@@ -359,14 +364,13 @@ contains
 
    end subroutine
 
-   subroutine sobolev_escape(nlev, ntran, baseAvals, sobesc, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)
+   subroutine sobolev_escape(nlev, ntran, baseAvals, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)
       !calculates Sobolev escape probability.
       implicit none
       integer :: nlev, ntran
       !
       real(f64) ::  pops(nlev), weights(nlev)
       real(f64) :: baseAvals(ntran), wl_cm_cubed(ntran)
-      real(f64) :: sobesc(ntran)
       !
       real(f64) :: atomicDensityLocal
       real(f64) :: tau, time_exp_days, time_exp_sec
@@ -378,7 +382,7 @@ contains
 
       print *, 'number density', atomicDensityLocal, 'cm-3'
 
-      sobesc(:) = 1.0_f64
+      sob(:) = 1.0_f64
 
       !write(0,*) 'sobconst',sobconst,atomicDensityLocal
 
@@ -386,13 +390,12 @@ contains
          do jj = ii + 1, nlev
             pp = upperTriangleIndexing(ii, jj, nlev)
 
-          tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
-            !print*,tau, sobconst,baseAvals(pp),atomicDensityLocal,time_exp_sec
-
-            if (tau > 1.0e-5_f64) sobesc(pp) = (1.0_f64 - exp(-tau))/tau
+            tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
+            if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64 - exp(-tau))/tau
             if ((tau < 0.0_f64)) write (999, *) ii, pops(ii), jj, pops(jj), baseAvals(pp), tau
          end do
       end do
+      !write(0,*) minval(sob)
       !
    end subroutine
 
