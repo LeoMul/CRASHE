@@ -14,9 +14,23 @@ module crm_module
    use constants_module
    use Periodic_Table
    use readadf04_module, only: upperTriangleIndexing
-   use atomicdata_module,only :qmatrix, aval,sob
+   use atomicdata_module,only :qmatrix, aval,sob, numLevels
    implicit none
+   integer, allocatable   :: ipiv(:)
+
 contains
+   subroutine deallocipiv
+      implicit none
+      if (allocated(ipiv)) deallocate(ipiv)
+   end subroutine
+
+   subroutine allocipiv 
+      implicit none 
+      call deallocipiv 
+      allocate(ipiv(numlevels))
+   end subroutine 
+
+
 
    subroutine coronalPopulation(nlev, ntran, g, E, Ups, Aval, Te, Ne, coronalPop)
       implicit none
@@ -104,7 +118,6 @@ contains
       real(f64), intent(inout) :: Q(nlev, nlev)
       real(f64), intent(out)   :: pops(nlev)
       
-      integer, allocatable   :: ipiv(:)
       integer, intent(out) :: ierr
       integer :: ii,jj,kk
 
@@ -135,11 +148,8 @@ contains
       pops(:) = 0.0_f64
       pops(1) = 1.0_f64
 
-      allocate (ipiv(nlev))
       call dgesv(nlev, 1, Q, nlev, ipiv, pops, nlev, ierr)
 !      write (69, *) info, pops
-      deallocate (ipiv)
-
    end subroutine
 
    subroutine build_cr_matrix(nlev, ntran, g, E, Ups, Aval, sob, Te, Ne, Q, Qcol1, ierr, writeoutrates)

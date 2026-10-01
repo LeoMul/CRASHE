@@ -143,67 +143,11 @@ contains
       write (*, '(A,ES10.4,A)') '  [timing] initial populations : ', t2 - t1, ' s'
       
       converged = .false.
-      sob       = 1.0_f64
       sob_old   = 1.0_f64
-      pops_old  = 0.0_f64
-
       popsnosob = col1
       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, density, energies)
 
-      broadspec(:) = 0.0d0
-      wavelengthforspectrum(1) = wlmin_nm*1e-7
-      wavelengthforspectrum(numwl) = wlmax_nm*1e-7
-      dwl = 1e-7*(wlmax_nm - wlmin_nm)/(numwl - 1)
-      do j = 2, numwl - 1
-         wavelengthforspectrum(j) = wavelengthforspectrum(j - 1) + dwl
-      end do
-
-      if (sobolev) then
-         popsnosob = col1
-         pecnosob  = pec
-         pltnosob  = plt
-         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
-                             statweight, wl_cm_cubed, atomicDensity)
-
-         call cpu_time(t1)
-         sob_iter_loop: do sob_iter = 1, max_sob_iter
-
-            call solve_cr_with_continuity(numLevels,density, crm, col1, ierr)
-
-            write(0,*) maxval(col1 - popsnosob)
-
-            sob_old = sob
-
-            call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
-                                statweight, wl_cm_cubed, atomicDensity)
-
-            sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
-
-            !this is a fairly conservative convergence criterion - basically it asserts that
-            !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
-            beta_change = maxval(abs(sob - sob_old)/sob)
-
-            if (sob_iter > 1 .and. beta_change < sob_tol) then
-               converged = .true.
-               write (*, '(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
-               write (*, '(A,ES10.4)') '        with maximum dBeta/Beta : ', beta_change
-               exit sob_iter_loop
-            end if
-
-            beta_change_old = beta_change
-
-         end do sob_iter_loop
-
-         call cpu_time(t2)
-         write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
-
-         if (.not. converged) then
-            write (*, '(A,I4,A,I3,A,2ES10.2)') &
-               'WARNING: Sobolev did not converge for temp index ', i, &
-               ' after ', max_sob_iter, ' iterations', beta_change, beta_change_old
-         end if
-
-      end if
+      if (sobolev) call convergeSobolev
 
       call cpu_time(t1)
       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, density, energies)
@@ -257,7 +201,14 @@ contains
       close (100)
 
       call cpu_time(t1)
-    call broadenedSpectrum(size(wavelengthforspectrum),wavelengthforspectrum,velocityExpansionC,broadspec,ntran,pec,wl_cm,density,numions,broadmodedefault)
+      broadspec(:) = 0.0d0
+      wavelengthforspectrum(1) = wlmin_nm*1e-7
+      wavelengthforspectrum(numwl) = wlmax_nm*1e-7
+      dwl = 1e-7*(wlmax_nm - wlmin_nm)/(numwl - 1)
+      do j = 2, numwl - 1
+         wavelengthforspectrum(j) = wavelengthforspectrum(j - 1) + dwl
+      end do
+      call broadenedSpectrum(size(wavelengthforspectrum),wavelengthforspectrum,velocityExpansionC,broadspec,ntran,pec,wl_cm,density,numions,broadmodedefault)
       call cpu_time(t2)
       write (*, '(A,ES10.4,A)') '  [timing] spectrum broadening : ', t2 - t1, ' s'
 
@@ -274,7 +225,50 @@ contains
 
    end subroutine
 
-   subroutine colradBigGridForPython()
+   subroutine convergeSobolev
+      implicit none
+      call cpu_time(t1)
+      popsnosob = col1
+      pecnosob  = pec
+      pltnosob  = plt
+      call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                           statweight, wl_cm_cubed, atomicDensity)
+
+      sob_iter_loop: do sob_iter = 1, max_sob_iter
+
+         call solve_cr_with_continuity(numLevels,density, crm, col1, ierr)
+
+         write(0,*) maxval(col1 - popsnosob)
+
+         sob_old = sob
+
+         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                              statweight, wl_cm_cubed, atomicDensity)
+
+         sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
+
+         !this is a fairly conservative convergence criterion - basically it asserts that
+         !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
+         beta_change = maxval(abs(sob - sob_old)/sob)
+
+         if (sob_iter > 1 .and. beta_change < sob_tol) then
+            converged = .true.
+            write (*, '(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
+            write (*, '(A,ES10.4)') '        with maximum dBeta/Beta : ', beta_change
+            exit sob_iter_loop
+         end if
+
+         beta_change_old = beta_change
+
+      end do sob_iter_loop
+
+      call cpu_time(t2)
+      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
+      if (.not. converged) then
+         write (*, '(A,I4,A,I3,A,2ES10.2)') &
+            'WARNING: Sobolev did not converge for temp index ', i, &
+            ' after ', max_sob_iter, ' iterations', beta_change, beta_change_old
+      end if
 
    end subroutine
 
@@ -514,7 +508,7 @@ contains
    subroutine alloc
       implicit none
       numTempsReq = 1
-
+      call allocipiv
       allocate (crm(numLevels, numLevels))
       allocate (col1(numLevels), pops_old(numLevels))
       allocate (tempsReq(numTempsReq))
@@ -531,6 +525,7 @@ contains
 
    subroutine dealloc
       call dealloc_atomicdata
+      call deallocipiv
       if (allocated(tempsReq)) deallocate (tempsReq)
       if (allocated(upsInterp)) deallocate (upsInterp)
       if (allocated(crm)) deallocate (crm)
