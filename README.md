@@ -24,39 +24,14 @@ C_{ij} =   \begin{cases}
     \end{cases}
 $$
 
-And the steady state is obtained as the matrix equation $\sum_j C_{ij} n_j = 0$. For $N$ levels in the system, we have $N$ equations that are linearly dependent. Therefore we additionally need to enforce some other condition to have a unique solution. The particle conservation $\sum_j n_j =1$ is adequate. This is typically used in conjunction with the diagonalization of $C_{ij}$, and the selection of the eigenvector with eigenvalue zero. 
-
-For an inversion - we choose to write all levels relative to $n_1$, e.g 
+And the steady state is obtained as the matrix equation $\sum_j C_{ij} n_j = 0$. For $N$ levels in the system, we have $N$ equations that are linearly dependent. Therefore we additionally need to enforce some other condition to have a unique solution. The particle conservation $\sum_j n_j =1$ is adequate. This is typically used in conjunction with the diagonalization of $C_{ij}$, and the selection of the eigenvector with eigenvalue zero. For our purposes, we solve the equation,
 
 $$
-n_i/n_1 \to n_i, i>1. 
+An=b,
 $$
 
-We therefore have for the steady state condition,
+where $b_i=\delta_{i1}$ and $A_{i1} = 1 $, $A_{ij} = C_{ij} $ for $j>1$. I.e we solve $Cn=0$, replacing the top row with all ones. This automatically gives a normalized population sum. The routine `lapack::dgesv` is used to perform the inversion.
 
-$$
-\sum_{j>1} C_{ij} n_j = -C_{i1}.
-$$
-
-Define the matrix $A$ = $( C_{ij} ;~i,j>1)$, and the column vectors $x =  (n_j; ~j>2)$, $b =  (-C_{i1}; ~i>2)$. The resulting $N-1 \times N-1$ matrix equation is then solved by
-
-$$
-x=A^{-1} b,
-$$
-
-or
-
-$$
-n_i/n_1 = -\sum_{j>2 }(A^{-1})_{ij} C_{j1}
-$$
-
-which is solved by the lapack routines dgesv or dgesvx. The matrix $A$ is stored in the $N-1 \times N-1$ fortran array `crm`, and the vector of mathematical size $N-1$ $C_{i1}$ is stored in the fortran array `col1` - that is actually allocated the size $N$. This is because the resultant levels are re-normalized such that
-
-$$
-1 = \sum_i n_i,
-$$
-
-and all of the populations including the ground (total $N$) are stored in `col1`. See the routine `solve_cr_populations_axb` (where these variables are masked as `Q` and `qcol1` respectively).
 
 Should the user request Sobolev opacity with the namelist variable `sobolev=.true.`, they are required to additionally specify the time since explosion in days `timeSinceExplosionDays`. They should also specify one of:
 - `velocityExpansionC` - the rough expansion velocity in units of the speed of light, as well as `massElementSolar` the ionic mass in solar masses. From these two variables, combined with `timeSinceExplosionDays` - an estimate of the absolute number density of the element is calculated. Provided the code has been given an atomic number (which is gauranteed in the adf04), it makes an estimate of the number of particles as `massElementSolar / A(Z)` where `A(Z)` is the atomic mass.
@@ -64,7 +39,7 @@ Should the user request Sobolev opacity with the namelist variable `sobolev=.tru
 
 
 
-Right now it is a single velocity model, but I am implemented an onion model of the form,
+Right now it is a single velocity model, but I am implementing an onion model of the form,
 
 $$
 n_e(v) = N v^{-\alpha}
