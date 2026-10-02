@@ -253,6 +253,7 @@ module colradfort
             call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.false.)
             col1 = popswithsob
             if (sobolev) then 
+               !call BoltzmanPopulation(numLevels,statweight,energies, tempGrid(i),col1)
                call convergeSobolev(densGrid(j))
                call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.true.)
                popswithsob = col1 
@@ -262,6 +263,7 @@ module colradfort
       end do
       call cpu_time(t2)
       write(50,*) t2-t1
+      write(50,*) latime
    end subroutine
 
 
@@ -305,9 +307,23 @@ module colradfort
             exit sob_iter_loop
          end if
 
+         !if (sob_iter > 1) then
+         !   if (beta_change > beta_change_old) then
+         !   ! Oscillating or diverging: reduce step size
+         !      sob_damp = max(0.05_f64, sob_damp * 0.5_f64)
+         !   else if (beta_change < 0.8_f64 * beta_change_old) then
+         !! Monotonically converging well: gradually restore step size
+         !      sob_damp = min(sob_damp_initial, sob_damp * 1.05_f64)
+         !   end if
+         !end if
+
+
          beta_change_old = beta_change
 
-         if (mod(sob_iter,10) == 0) sob_damp = sob_damp * 0.5_f64
+         if (mod(sob_iter,10) == 0) then 
+            sob_damp = sob_damp * 0.5_f64
+            !sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
+         end if
 
       end do sob_iter_loop
 

@@ -16,7 +16,6 @@ program mycrm
 
    select case (trim(mode))
       case ('astro')
-
          call colrad
       case ('levelscan')
          call levelscan

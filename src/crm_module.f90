@@ -17,6 +17,7 @@ module crm_module
    use atomicdata_module,only :qmatrix, aval,sob, numLevels
    implicit none
    integer, allocatable   :: ipiv(:)
+   real(f64) :: latime
 
 contains
    subroutine deallocipiv
@@ -152,6 +153,7 @@ contains
       real(f64)                :: density
       real(f64), intent(inout) :: Q(nlev, nlev)
       real(f64), intent(out)   :: pops(nlev)
+      real(f64) :: t1,t2 
       
       integer, intent(in), optional :: skipbuild, ninclude
       logical, intent(in), optional :: useSob
@@ -180,8 +182,11 @@ contains
       nincludeInternal = nlev
       if (present(ninclude)) nincludeInternal   = ninclude
 !
+      call cpu_time(t1)
       call dgesv(nincludeInternal, 1, Q, nlev, ipiv, pops, nlev, ierr)
-!
+      call cpu_time(t2)
+      latime = latime + t2 - t1
+      !     
       if (ierr /= 0) stop 'error in dgesv'
 !
 !      write (69, *) info, pops
@@ -228,7 +233,7 @@ contains
       do ii = 1, nlev - 1
          do jj = ii + 1, nlev
             pp = upperTriangleIndexing(ii, jj, nlev)
-
+            write(0,*) pp
             tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
             
             if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64 - exp(-tau))/tau
