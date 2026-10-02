@@ -231,7 +231,7 @@ module colradfort
    subroutine tempDensScan 
       implicit none 
       real(f64) :: tempGrid( 3)
-      real(f64) :: densGrid(10)
+      real(f64) :: densGrid(100)
       real(f64),allocatable :: popswithsob(:)
       real(f64) :: t1,t2
       call cpu_time(t1)
@@ -239,7 +239,7 @@ module colradfort
       shellVelocityInnerC = 0.0_f64
       call getAtomicDensityLocal
       tempGrid(:) = (/(i * 1000       , i=1, 3, 1)/)
-      densGrid(:) = (/(10.0_f64 ** i  , i=1,10, 1)/)
+      densGrid(:) = (/(10.0_f64 ** (real(i)/real(10))  , i=1,100, 1)/)
       sob_old   = 1.0_f64
       sob       = 1.0_f64
 
@@ -252,12 +252,12 @@ module colradfort
             call solve_cr_with_continuity(numLevels,densGrid(j), crm, col1, ierr,useSob=.false.)
             if ( (i == 1) .and. (j==1)) popswithsob = col1 
             call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.false.)
-            col1 = popswithsob
+            !col1 = popswithsob
             if (sobolev) then 
                !call BoltzmanPopulation(numLevels,statweight,energies, tempGrid(i),col1)
                call convergeSobolev(densGrid(j))
                call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.true.)
-               popswithsob = col1 
+               !popswithsob = col1 
             end if 
             write(50,'(2ES10.3, I4)') pltnosob,plt,sob_iter
          end do       
@@ -344,7 +344,7 @@ module colradfort
    end subroutine
 
 
-   subroutine convergeSobolev(electron_density)
+   subroutine convergeSobolev1(electron_density)
       implicit none
       real(f64) :: electron_density
 
@@ -438,6 +438,128 @@ module colradfort
       end if
 
       deallocate (x, f, fprev, d, col_old, dpop, lev_mask)
+   end subroutine convergeSobolev1
+   subroutine convergeSobolev(electron_density)
+      implicit none
+      real(f64) :: electron_density
+
+      real(f64), parameter :: d_min      = 2.0e-3_f64
+      real(f64), parameter :: shrink     = 0.5_f64     ! d -> shrink*d on a non-decaying sign flip
+      real(f64), parameter :: grow       = 1.5_f64     ! recovery toward the per-line cap
+      real(f64), parameter :: cap_relax  = 1.02_f64    ! cap creeps back up 2% per iteration
+      real(f64), parameter :: flip_ratio = 0.6_f64     ! a flip with |f| < ratio*|fprev| is decaying: ignore
+      real(f64), parameter :: pop_floor  = 1.0e-10_f64
+      real(f64), parameter :: flux_floor = 1.0e-6_f64
+      real(f64), parameter :: res_factor = 10.0_f64
+      logical,   parameter :: warm_start  = .true.     ! start from the previous grid point's beta
+      logical,   parameter :: require_res = .false.    ! also demand the masked undamped residual be small
+      logical,   parameter :: debug_sob   = .true.
+
+      real(f64), allocatable, save :: x_keep(:), cap_keep(:)
+      real(f64), allocatable :: x(:), f(:), fprev(:), d(:), dcap(:), eff(:), col_old(:), dpop(:)
+      logical,   allocatable :: lev_mask(:), tr_mask(:), flip(:)
+      real(f64) :: pop_change, res, f_floor
+      integer   :: ilev
+      logical   :: warm, conv
+
+      allocate (x(ntran), f(ntran), fprev(ntran), d(ntran), dcap(ntran), eff(ntran), flip(ntran), tr_mask(ntran))
+      allocate (col_old(size(col1)), dpop(size(col1)), lev_mask(size(col1)))
+
+      f_floor    = 0.1_f64*sob_tol
+      fprev      = 0.0_f64
+      converged  = .false.
+      pop_change = huge(1.0_f64)
+      res        = huge(1.0_f64)
+
+      warm = warm_start .and. (i > 1)
+      if (warm) warm = allocated(x_keep)
+      if (warm) warm = (size(x_keep) == ntran)
+
+      call cpu_time(t1)
+      popsnosob = col1
+      pecnosob  = pec
+      pltnosob  = plt
+
+      if (warm) then
+         x    = x_keep
+         dcap = min(1.0_f64, 4.0_f64*cap_keep)
+      else
+         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                             statweight, wl_cm_cubed, atomicDensity)
+         x    = log(sob)
+         dcap = 1.0_f64
+      end if
+      d = dcap
+
+      sob_iter_loop: do sob_iter = 1, max_sob_iter
+
+         sob = exp(x)                            ! beta used in this solve
+         col_old = col1
+         call solve_cr_with_continuity(numLevels, electron_density, crm, col1, ierr, useSob=.true.)
+
+         lev_mask   = col1 > pop_floor*maxval(col1)
+         dpop       = abs(col1 - col_old)/max(col1, tiny(1.0_f64))
+         pop_change = maxval(dpop, lev_mask)
+
+         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                             statweight, wl_cm_cubed, atomicDensity)      ! sob <- G(x)
+         f = log(sob) - x                                                 ! undamped residual in ln(beta)
+
+         eff     = sob_weight*sob
+         tr_mask = eff > flux_floor*maxval(eff)
+         if (.not. any(tr_mask)) tr_mask = .true.
+         res = maxval(abs(1.0_f64 - exp(-f)), tr_mask)
+
+         if (debug_sob) then
+            ilev = maxloc(dpop, 1, lev_mask)
+            write (0, '(A,I4,A,ES10.3,A,I6,A,ES10.3,A,I7,A,ES9.2)') ' it=', sob_iter, &
+               ' dpop=', pop_change, ' (lev ', ilev, ') res=', res, &
+               ' n(d<0.5)=', count(d < 0.5_f64), ' dmin=', minval(d)
+         end if
+
+         conv = (sob_iter > 1) .and. (pop_change < sob_tol)
+         if (require_res) conv = conv .and. (res < res_factor*sob_tol)
+         if (conv) then
+            converged = .true.
+            sob = exp(x)                         ! consistent with the col1 just solved
+            write (*, '(A,I4)')     ' [sobolev] converged at iter   :', sob_iter
+            write (*, '(A,ES10.4)') '        with maximum dPop/Pop   : ', pop_change
+            exit sob_iter_loop
+         end if
+
+         ! Per-line damping: shrink only on a sign flip that is not decaying
+         if (sob_iter > 1) then
+            flip = (f*fprev < 0.0_f64) .and. (abs(f) > f_floor) .and. (abs(f) > flip_ratio*abs(fprev))
+            where (flip)
+               dcap = max(d_min, shrink*d)
+               d    = dcap
+            elsewhere
+               dcap = min(1.0_f64, cap_relax*dcap)
+               d    = min(dcap, grow*d)
+            end where
+         end if
+
+         fprev = f
+         x = min(x + d*f, 0.0_f64)               ! beta <= 1
+
+      end do sob_iter_loop
+
+      if (allocated(x_keep)) then
+         if (size(x_keep) /= ntran) deallocate (x_keep, cap_keep)
+      end if
+      if (.not. allocated(x_keep)) allocate (x_keep(ntran), cap_keep(ntran))
+      x_keep   = x
+      cap_keep = dcap
+
+      call cpu_time(t2)
+      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
+      if (.not. converged) then
+         write (*, '(A,I4,A,I3,A,2ES10.2)') &
+            'WARNING: Sobolev did not converge for temp index ', i, &
+            ' after ', max_sob_iter, ' iterations; dPop, res:', pop_change, res
+      end if
+
+      deallocate (x, f, fprev, d, dcap, eff, flip, tr_mask, col_old, dpop, lev_mask)
    end subroutine convergeSobolev
 
    subroutine levelscan()
