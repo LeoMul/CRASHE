@@ -18,7 +18,8 @@ contains
       real(f64)             :: ei, ej
       integer               :: ii, jj, pp
       logical, intent(in), optional :: useSob
-      logical :: useSobInternal = .true.
+      logical :: useSobInternal 
+      useSobInternal = .true.
       if (present(useSob))    useSobInternal = useSob
       !
       plt = 0.0_f64

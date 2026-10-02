@@ -115,8 +115,10 @@ contains
       real(f64)                :: density
       real(f64), intent(inout) :: Q(nlev, nlev)
       integer :: ii,jj,kk
-      logical :: useSobInternal = .true.
+      logical :: useSobInternal 
       logical, intent(in), optional :: useSob
+      !default:
+      useSobInternal = .true.
       if (present(useSob))    useSobInternal = useSob
       Q(:,:)  = density * qmatrix(:,:)
       kk=1
@@ -153,14 +155,17 @@ contains
       
       integer, intent(in), optional :: skipbuild, ninclude
       logical, intent(in), optional :: useSob
-      logical :: useSobInternal = .true.
-      integer :: skipbuildinternal = 0, nincludeInternal
+      logical :: useSobInternal 
+      integer :: skipbuildinternal, nincludeInternal
       integer, intent(out) :: ierr
       
+      !defaults
+      useSobInternal = .true. 
+      skipbuildinternal = 0
 
       !if the CRM for this case has already been built, for some reason.
       if (present(skipbuild)) skipbuildinternal = skipbuild
-      if (present(useSob))    useSobInternal = useSob
+      if (present(useSob))    useSobInternal    = useSob
       if (skipbuildinternal == 0) then 
          call build_crm(nlev, density, Q, useSob=useSobInternal)
       end if 
