@@ -256,6 +256,7 @@ module colradfort
             if (sobolev) then 
                !call BoltzmanPopulation(numLevels,statweight,energies, tempGrid(i),col1)
                call convergeSobolev(densGrid(j))
+               call newtonSobolev(densGrid(j))
                call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.true.)
                !popswithsob = col1 
             end if 
@@ -343,102 +344,223 @@ module colradfort
 
    end subroutine
 
-
-   subroutine convergeSobolev1(electron_density)
+   subroutine newtonSobolev(electron_density)
       implicit none
       real(f64) :: electron_density
 
-      real(f64), parameter :: d_init    = 1.0_f64      ! start undamped; use 0.7 if iteration 1-2 overshoot
-      real(f64), parameter :: d_min     = 2.0e-3_f64
-      real(f64), parameter :: shrink    = 0.3_f64      ! d -> shrink*d when a line's residual flips sign
-      real(f64), parameter :: grow      = 1.1_f64      ! slow recovery otherwise
-      real(f64), parameter :: pop_floor = 1.0e-10_f64
-      logical,   parameter :: warm_damp = .true.       ! carry learned damping to the next grid point
-      logical,   parameter :: debug_sob = .true.
+      integer,   parameter :: max_newton = 40
+      real(f64), parameter :: newton_tol = 1.0e-8_f64   ! on the full Newton step; cheap, convergence is quadratic
+      real(f64), parameter :: pop_floor  = 1.0e-10_f64
+      real(f64), parameter :: max_drop   = 0.9_f64      ! no level may lose more than 90% per step
+      logical,   parameter :: use_continuation = .false. ! tau-scaling 0.01 -> 0.1 -> 1 (try if it stalls)
+      logical,   parameter :: fallback   = .true.        ! on failure, run the damped convergeSobolev
+      logical,   parameter :: check_jac  = .false.       ! one-off finite-difference test of J
+      logical,   parameter :: verify     = .true.        ! one Picard solve at the end as a consistency check
+      logical,   parameter :: debug_sob  = .true.
 
-      real(f64), allocatable, save :: d_keep(:)
-      real(f64), allocatable :: x(:), f(:), fprev(:), d(:), col_old(:), dpop(:)
-      logical,   allocatable :: lev_mask(:)
-      real(f64) :: pop_change
-      integer   :: ilev
+      real(f64), allocatable :: n(:), nt(:), dn(:), F(:), Ft(:), fscale(:), Q(:,:), J(:,:), chk(:)
+      integer,   allocatable :: ipiv(:)
+      logical,   allocatable :: lmask(:)
+      real(f64) :: stages(3), tsec, ts, tol, alpha, Fnorm, Ftnorm, step_rel
+      real(f64) :: tt0, tt1, t_asm, t_sol
+      integer   :: nstage, istage, it, ils, info, ilev, ntot, nasm
+      logical   :: stage_ok
 
-      allocate (x(ntran), f(ntran), fprev(ntran), d(ntran))
-      allocate (col_old(size(col1)), dpop(size(col1)), lev_mask(size(col1)))
+      allocate (n(numLevels), nt(numLevels), dn(numLevels), F(numLevels), Ft(numLevels))
+      allocate (fscale(numLevels), Q(numLevels,numLevels), J(numLevels,numLevels))
+      allocate (chk(numLevels), ipiv(numLevels), lmask(numLevels))
 
-      if (warm_damp .and. allocated(d_keep)) then
-         d = min(1.0_f64, 4.0_f64*d_keep)       ! stiff lines stay cautious, others recover fast
-      else
-         d = d_init
-      end if
-      fprev      = 0.0_f64
-      converged  = .false.
-      pop_change = huge(1.0_f64)
+      tsec      = timeSinceExplosionDays*86400.0_f64
+      converged = .false.
+      ntot      = 0
+      nasm      = 0
+      t_asm     = 0.0_f64
+      t_sol     = 0.0_f64
 
       call cpu_time(t1)
       popsnosob = col1
       pecnosob  = pec
       pltnosob  = plt
 
+      n = max(col1, tiny(1.0_f64))
+      n = n/sum(n)
+
+      if (use_continuation) then
+         nstage = 3
+         stages = [0.01_f64, 0.1_f64, 1.0_f64]
+      else
+         nstage = 1
+         stages = 1.0_f64
+      end if
+
+      if (check_jac) call jac_check(n, stages(nstage))
+
+      stage_loop: do istage = 1, nstage
+         ts  = stages(istage)
+         tol = merge(newton_tol, 1.0e-3_f64, istage == nstage)
+         stage_ok = .false.
+
+         ! F, fscale and J at the current n; afterwards they are carried over from the line search
+         call assemble(n, ts, F, J, .true.)
+
+         newton_loop: do it = 1, max_newton
+            ntot  = ntot + 1
+            Fnorm = maxval(abs(F)/fscale)
+
+            dn = -F
+            call cpu_time(tt0)
+            call dgesv(numLevels, 1, J, numLevels, ipiv, dn, numLevels, info)
+            call cpu_time(tt1)
+            t_sol = t_sol + (tt1 - tt0)
+            if (info /= 0) then
+               write (*, '(A,I6)') ' [newton] singular Jacobian, info =', info
+               exit stage_loop
+            end if
+
+            lmask    = n > pop_floor*maxval(n)
+            step_rel = maxval(abs(dn)/max(n, tiny(1.0_f64)), lmask)
+
+            ! Backtracking line search on the scaled residual; componentwise limit on drops.
+            ! Each trial also builds the Jacobian, so the accepted point needs no further assembly.
+            alpha = 1.0_f64
+            do ils = 1, 20
+               nt = max(n + alpha*dn, (1.0_f64 - max_drop)*n)
+               call assemble(nt, ts, Ft, J, .true.)
+               Ftnorm = maxval(abs(Ft)/fscale)
+               if (Ftnorm < (1.0_f64 - 1.0e-4_f64*alpha)*Fnorm) exit
+               alpha = 0.5_f64*alpha
+            end do
+            n = nt
+            F = Ft                           ! fscale and J already correspond to nt
+
+            if (debug_sob) then
+               ilev = maxloc(abs(dn)/max(n, tiny(1.0_f64)), 1, lmask)
+               write (0, '(A,F5.2,A,I3,A,ES10.3,A,ES10.3,A,F7.4,A,I5)') ' newton ts=', ts, ' it=', it, &
+                  ' |F|=', Ftnorm, ' dn/n=', step_rel, ' alpha=', alpha, ' lev=', ilev
+            end if
+
+            if (step_rel < tol) then
+               stage_ok = .true.
+               exit newton_loop
+            end if
+         end do newton_loop
+
+         if (.not. stage_ok) exit stage_loop
+         if (istage == nstage) converged = .true.
+      end do stage_loop
+
+      sob_iter = ntot
+
+      if (.not. converged .and. fallback) then
+         write (*, '(A,I4)') ' [newton] failed; falling back to damped iteration, temp index ', i
+         col1 = popsnosob
+         call convergeSobolev(electron_density)
+         return
+      end if
+
+      ! make col1 and sob mutually consistent: sob = G(n)
+      col1 = n
       call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
                           statweight, wl_cm_cubed, atomicDensity)
-      x = log(sob)                               ! iterate on x = ln(beta)
 
-      sob_iter_loop: do sob_iter = 1, max_sob_iter
-
-         sob = exp(x)                            ! beta used in this solve
-         col_old = col1
-         call solve_cr_with_continuity(numLevels, electron_density, crm, col1, ierr, useSob=.true.)
-
-         lev_mask   = col1 > pop_floor*maxval(col1)
-         dpop       = abs(col1 - col_old)/max(col1, tiny(1.0_f64))
-         pop_change = maxval(dpop, lev_mask)
-
-         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
-                             statweight, wl_cm_cubed, atomicDensity)      ! sob <- G(x)
-         f = log(sob) - x                                                 ! undamped residual in ln(beta)
-
-         if (debug_sob) then
-            ilev = maxloc(dpop, 1, lev_mask)
-            write (0, '(A,I4,A,ES10.3,A,I6,A,I7,A,ES9.2)') ' it=', sob_iter, ' dpop=', pop_change, &
-               ' (lev ', ilev, ')  n(d<0.5)=', count(d < 0.5_f64), '  dmin=', minval(d)
-         end if
-
-         if (sob_iter > 1 .and. pop_change < sob_tol) then
-            converged = .true.
-            sob = exp(x)                         ! consistent with the col1 just solved
-            write (*, '(A,I4)')     ' [sobolev] converged at iter   :', sob_iter
-            write (*, '(A,ES10.4)') '        with maximum dPop/Pop   : ', pop_change
-            exit sob_iter_loop
-         end if
-
-         if (sob_iter > 1) then
-            where (f*fprev < 0.0_f64)
-               d = max(d_min, shrink*d)
-            elsewhere
-               d = min(1.0_f64, grow*d)
-            end where
-         end if
-
-         fprev = f
-         x = min(x + d*f, 0.0_f64)               ! beta <= 1
-
-      end do sob_iter_loop
-
-      if (warm_damp) then
-         if (.not. allocated(d_keep)) allocate (d_keep(ntran))
-         d_keep = d
+      if (verify) then
+         chk = col1
+         call solve_cr_with_continuity(numLevels, electron_density, crm, chk, ierr, useSob=.true.)
+         step_rel = maxval(abs(chk - n)/max(n, tiny(1.0_f64)), n > pop_floor*maxval(n))
+         write (*, '(A,I4,A,ES10.3)') ' [newton] iterations:', ntot, '   verification dPop/Pop:', step_rel
       end if
 
       call cpu_time(t2)
-      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
-      if (.not. converged) then
-         write (*, '(A,I4,A,I3,A,ES10.2)') &
-            'WARNING: Sobolev did not converge for temp index ', i, &
-            ' after ', max_sob_iter, ' iterations; dPop:', pop_change
-      end if
+      write (*, '(A,ES10.4,A)') '  [timing] Sobolev (Newton)         : ', t2 - t1, ' s'
+      write (*, '(A,ES10.3,A,I4,A,ES10.3,A)') '  [timing]   assemble: ', t_asm, ' s (', nasm, ' calls),  dgesv: ', t_sol, ' s'
+      if (.not. converged) write (*, '(A,I4)') 'WARNING: Newton did not converge for temp index ', i
 
-      deallocate (x, f, fprev, d, col_old, dpop, lev_mask)
-   end subroutine convergeSobolev1
+   contains
+
+      subroutine assemble(x, tscale, Fx, Jx, wantJ)
+         ! Builds Q exactly as build_crm does (with beta evaluated from x), then
+         !   Fx = Q x with row 1 replaced by sum(x) - 1
+         !   Jx = dFx/dx (only when wantJ; otherwise Jx is left untouched)
+         real(f64), intent(in)    :: x(:), tscale
+         real(f64), intent(inout) :: Fx(:), Jx(:,:)
+         logical,   intent(in)    :: wantJ
+         real(f64) :: c, tau, beta, dbeta, em, w, ta0, ta1
+         integer   :: ii, jj, kk
+
+         call cpu_time(ta0)
+
+         Q = electron_density*qmatrix
+         if (wantJ) Jx = 0.0_f64
+
+         kk = 1
+         do ii = 1, numLevels - 1
+            do jj = ii + 1, numLevels
+               c   = tscale*sobconst*aval(kk)*wl_cm_cubed(kk)*statweight(jj)*atomicDensity*tsec
+               tau = c*(x(ii)/statweight(ii) - x(jj)/statweight(jj))
+               if (tau > 1.0e-5_f64) then          ! same branch as sobolev_escape (beta = 1 otherwise)
+                  em   = exp(-tau)
+                  beta = (1.0_f64-exp(-tau))/tau
+                  if (tau < 1.0e-3_f64) then
+                     dbeta = -0.5_f64 + tau/3.0_f64 - tau*tau/8.0_f64
+                  else
+                     dbeta = (em*(1.0_f64 + tau) - 1.0_f64)/(tau*tau)
+                  end if
+               else
+                  beta  = 1.0_f64
+                  dbeta = 0.0_f64
+               end if
+               Q(ii,jj) = Q(ii,jj) + aval(kk)*beta
+               if (wantJ .and. dbeta /= 0.0_f64) then
+                  w = aval(kk)*x(jj)*dbeta*c       ! A * n_u * dbeta/dtau * c
+                  Jx(ii,ii) = Jx(ii,ii) + w/statweight(ii)
+                  Jx(ii,jj) = Jx(ii,jj) - w/statweight(jj)
+                  Jx(jj,ii) = Jx(jj,ii) - w/statweight(ii)
+                  Jx(jj,jj) = Jx(jj,jj) + w/statweight(jj)
+               end if
+               kk = kk + 1
+            end do
+         end do
+         do jj = 1, numLevels                      ! loss conservation, as in build_crm
+            Q(jj,jj) = -sum(Q(:,jj))
+         end do
+
+         call dgemv('N', numLevels, numLevels, 1.0_f64, Q, numLevels, x, 1, 0.0_f64, Fx, 1)
+
+         fscale = tiny(1.0_f64)                    ! residual scale: total flux through each level,
+         do jj = 1, numLevels                      ! accumulated column by column (unit stride)
+            fscale = fscale + abs(Q(:,jj))*abs(x(jj))
+         end do
+
+         if (wantJ) Jx = Jx + Q
+
+         Fx(1)     = sum(x) - 1.0_f64              ! continuity row
+         fscale(1) = 1.0_f64
+         if (wantJ) Jx(1,:) = 1.0_f64
+
+         call cpu_time(ta1)
+         t_asm = t_asm + (ta1 - ta0)
+         nasm  = nasm + 1
+      end subroutine assemble
+
+      subroutine jac_check(x, tscale)
+         real(f64), intent(in) :: x(:), tscale
+         real(f64), allocatable :: F0(:), F1(:), xp(:), Jfd(:)
+         real(f64) :: h
+         integer   :: k
+         allocate (F0(numLevels), F1(numLevels), xp(numLevels), Jfd(numLevels))
+         call assemble(x, tscale, F0, J, .true.)
+         do k = 1, numLevels, max(1, numLevels/8)
+            h  = 1.0e-6_f64*max(x(k), 1.0e-12_f64)
+            xp = x;  xp(k) = xp(k) + h
+            call assemble(xp, tscale, F1, J, .false.)       ! leaves J (analytic) untouched
+            Jfd = (F1 - F0)/h
+            write (0, '(A,I5,A,ES10.3)') ' jac check col', k, '  max rel err:', &
+               maxval(abs(Jfd - J(:,k)))/(maxval(abs(J(:,k))) + tiny(1.0_f64))
+         end do
+      end subroutine jac_check
+
+   end subroutine newtonSobolev
+
    subroutine convergeSobolev(electron_density)
       implicit none
       real(f64) :: electron_density
