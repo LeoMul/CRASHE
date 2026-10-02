@@ -1,0 +1,7 @@
+ &crm_input 
+ temperature            = 3000
+ density                = 300000.0
+ adf04path              ='/Users/leomulholland/CePaper/data/adf045855' 
+ requiredLumo           =2e+38 
+ mode                   = 'masscontour' 
+ &end 

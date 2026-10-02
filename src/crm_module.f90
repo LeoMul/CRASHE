@@ -142,7 +142,7 @@ contains
       real(f64), intent(inout) :: Q(nlev, nlev)
       real(f64), intent(out)   :: pops(nlev)
       
-      integer, intent(in), optional :: skipbuild,ninclude
+      integer, intent(in), optional :: skipbuild, ninclude
       integer :: skipbuildinternal = 0, nincludeInternal 
       integer, intent(out) :: ierr
       
@@ -160,11 +160,14 @@ contains
       pops(1) = 1.0_f64
 !     
 !     If for some reason the user wants to override the number of levels
-!     actually included in the CRM.
+!     actually included in the population inversion.
       nincludeInternal = nlev
       if (present(ninclude)) nincludeInternal   = ninclude
 !
       call dgesv(nincludeInternal, 1, Q, nlev, ipiv, pops, nlev, ierr)
+!
+      if (ierr /= 0) stop 'error in dgesv'
+!
 !      write (69, *) info, pops
    end subroutine
 
@@ -175,10 +178,10 @@ contains
       integer :: ii, jj, pp
 
       cascade(:) = 0.0_f64
-
+      
+      !I think this is not particularly cache efficient... 
       do ii = 2, nlev
          do jj = 1, ii - 1
-            !print*,jj,ii
             pp = upperTriangleIndexing(jj, ii, nlev)
             cascade(ii) = cascade(ii) + avals(pp)
          end do
@@ -202,23 +205,23 @@ contains
       !
       time_exp_sec = time_exp_days*86400.0_f64
 
-      print *, 'number density', atomicDensityLocal, 'cm-3'
+      !print *, 'number density', atomicDensityLocal, 'cm-3'
 
       sob(:) = 1.0_f64
-
-      !write(0,*) 'sobconst',sobconst,atomicDensityLocal
 
       do ii = 1, nlev - 1
          do jj = ii + 1, nlev
             pp = upperTriangleIndexing(ii, jj, nlev)
 
             tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
+            
             if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64 - exp(-tau))/tau
+            !if tau is negative - ignore for now...
+            !it's usually due to numerical instablility of the CRM inversion as opposed to physical lasers...
             if ((tau < 0.0_f64)) write (999, *) ii, pops(ii), jj, pops(jj), baseAvals(pp), tau
          end do
       end do
-      !write(0,*) minval(sob)
-      !
+
    end subroutine
 
    subroutine broadenedSpectrum(numWavelengths, &
