@@ -30,7 +30,7 @@ $$
 An=b,
 $$
 
-where $b_i=\delta_{i1}$ and $A_{i1} = 1 $, $A_{ij} = C_{ij} $ for $j>1$. I.e we solve $Cn=0$, replacing the top row with all ones. This automatically gives a normalized population sum. The routine `lapack::dgesv` is used to perform the inversion.
+where $b_i=\delta_{i1}$ and $A_{1j} = 1 $, $A_{ij} = C_{ij} $ for $i>1$. I.e we solve $Cn=0$, replacing the top row with all ones. This automatically gives a normalized population sum. The routine `lapack::dgesv` is used to perform the inversion.
 
 
 Should the user request Sobolev opacity with the namelist variable `sobolev=.true.`, they are required to additionally specify the time since explosion in days `timeSinceExplosionDays`. They should also specify one of:

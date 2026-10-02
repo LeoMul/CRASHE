@@ -1,7 +1,7 @@
 module colradfort
 !module to pretty much call everything.
    use types
-   use atomicdata_module      ! the atomic data (numLevels, ntran, ups, aval, energies, ...)
+   use atomicdata_module      
    use readadf04_module
    use crm_module
    use interpolation_module
@@ -9,6 +9,7 @@ module colradfort
    use omp_lib
    use input
    use sorting
+   use constants_module
    implicit none
    integer                :: thrid
    integer                :: ierr, i, numTempsReq
@@ -28,9 +29,7 @@ module colradfort
    real(f64)              :: atomicDensity, numions
    ! shell boundaries (in units of c) used by getAtomicDensityLocal
    real(f64)              :: shellVelocityOuterC = 0.0_f64, shellVelocityInnerC = 0.0_f64
-   real(f64)              :: sob_damp = 0.5_f64
-   real(f64), parameter   :: sob_tol = 1.0e-2_f64
-   integer, parameter     :: max_sob_iter = 9999
+
    integer                :: sob_iter
    real(f64)              :: sob_change, beta_change, beta_change_old = 1.d6
    logical                :: converged
@@ -39,7 +38,7 @@ module colradfort
    character(len=300)     :: broadmodedefault = 'gaussian'
    integer*8              :: shellnumtemp = 0
 
-contains
+   contains
 
    subroutine getadf04
       implicit none
@@ -116,6 +115,9 @@ contains
       real(f64)            :: dwl
       character(len=20)    :: filesuffix
       integer, allocatable :: pecPointer(:)
+      shellVelocityOuterC = velocityExpansionC
+      shellVelocityInnerC = 0.0_f64
+      call getAtomicDensityLocal
 
       if (.not. allocated(wavelengthforspectrum) .or. .not. allocated(broadspec)) then
          stop 'colrad: spectrum arrays not allocated - call alloc(numwl) first'
@@ -147,7 +149,7 @@ contains
       popsnosob = col1
       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, density, energies)
 
-      if (sobolev) call convergeSobolev
+      if (sobolev) call convergeSobolev(density)
 
       call cpu_time(t1)
       call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, density, energies)
@@ -171,7 +173,7 @@ contains
       close (100)
 
       open (100, file='pecData'//trim(filesuffix))
-      write (100, *) 'Low, Upp,        Sob,        aval,         pec,                  wlcm,        popL,        popU'
+      write (100, *) ' Low, Upp,     Sob,    aval,     pec,         wlcm,    popL,    popU,'
 
       if (sortpec) then
          allocate (pecPointer(size(pec)))
@@ -225,20 +227,65 @@ contains
 
    end subroutine
 
-   subroutine convergeSobolev
+   subroutine tempDensScan 
+      implicit none 
+      real(f64) :: tempGrid( 3)
+      real(f64) :: densGrid(10)
+      real(f64),allocatable :: popswithsob(:)
+      real(f64) :: t1,t2
+      call cpu_time(t1)
+      shellVelocityOuterC = velocityExpansionC
+      shellVelocityInnerC = 0.0_f64
+      call getAtomicDensityLocal
+      tempGrid(:) = (/(i * 1000       , i=1, 3, 1)/)
+      densGrid(:) = (/(10.0_f64 ** i  , i=1,10, 1)/)
+      sob_old   = 1.0_f64
+      sob       = 1.0_f64
+
+      allocate(popswithsob(numLevels))
+
+      do i = 1, size(tempGrid)
+         call interpolate_upsilons_calc_rates(tempGrid(i))
+         do j = 1, size(densGrid)
+            !
+            call solve_cr_with_continuity(numLevels,densGrid(j), crm, col1, ierr,useSob=.false.)
+            if ( (i == 1) .and. (j==1)) popswithsob = col1 
+            call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.false.)
+            col1 = popswithsob
+            if (sobolev) then 
+               call convergeSobolev(densGrid(j))
+               call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.true.)
+               popswithsob = col1 
+            end if 
+            write(50,'(2ES10.3, I4)') pltnosob,plt,sob_iter
+         end do       
+      end do
+      call cpu_time(t2)
+      write(50,*) t2-t1
+   end subroutine
+
+
+   subroutine convergeSobolev(electron_density)
+
       implicit none
+      real(f64) :: electron_density      
+      real(f64) :: sob_damp 
+      sob_damp = sob_damp_initial
       call cpu_time(t1)
       popsnosob = col1
       pecnosob  = pec
       pltnosob  = plt
+
+      !write(0,*) 'initial approximation using  ',col1(1)
+
       call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
                            statweight, wl_cm_cubed, atomicDensity)
 
       sob_iter_loop: do sob_iter = 1, max_sob_iter
 
-         call solve_cr_with_continuity(numLevels,density, crm, col1, ierr)
+         call solve_cr_with_continuity(numLevels,electron_density, crm, col1, ierr,useSob=.true.)
 
-         write(0,*) maxval(col1 - popsnosob)
+         !write(0,*) maxval(col1 - popsnosob)
 
          sob_old = sob
 
@@ -250,7 +297,7 @@ contains
          !this is a fairly conservative convergence criterion - basically it asserts that
          !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
          beta_change = maxval(abs(sob - sob_old)/sob)
-
+         !write(0,*) beta_change
          if (sob_iter > 1 .and. beta_change < sob_tol) then
             converged = .true.
             write (*, '(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
@@ -260,7 +307,12 @@ contains
 
          beta_change_old = beta_change
 
+         if (mod(sob_iter,10) == 0) sob_damp = sob_damp * 0.5_f64
+
       end do sob_iter_loop
+
+      !write(0,*) 'converged approximation using',col1(1)
+      !write(0,*) '-----------------------------------------------------'
 
       call cpu_time(t2)
       write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'

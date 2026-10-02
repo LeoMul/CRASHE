@@ -15,10 +15,11 @@ contains
       xx = (eu - el) / kT
 
       qratedown = coll_fac * upsilon / sqrttemp
-
-      if (xx < 0.20_f64) then 
-         qrateup = qratedown * (1.0 - xx) / gl 
-      else if (xx < 700.0_f64) then 
+      !cut down on number of exp's called...
+      !if (xx < 0.20_f64) then 
+      !   qrateup = qratedown * (1.0 - xx) / gl 
+      !else 
+      if (xx < 700.0_f64) then 
          qrateup = qratedown * exp(-xx) /  gl 
       else 
          qrateup = 0.0_f64 
@@ -69,7 +70,7 @@ contains
          do jj = ii+1, numLevels
             gj = statweight(jj)
             ej = energies(jj)
-            call spline(log_temps_adf04, ups(:, tt), numTemps,     0.0d0, 0.0d0, yy)
+            call spline(log_temps_adf04, ups(:, tt),     numTemps,     0.0d0, 0.0d0, yy)
             call splint(log_temps_adf04, ups(:, tt), yy, numTemps, log_temp_req, upsinterp)
             !jj > ii 
             call qrates_from_ups(qmatrix(jj,ii), qmatrix(ii,jj), upsinterp,gi,gj,ei,ej,roottemp,KT)
@@ -87,7 +88,6 @@ contains
       PARAMETER(NMAX=500)
       INTEGER i, k
       DOUBLE PRECISION p, qn, sig, un, u(NMAX)
-      !print*,'hello',n,yp1,ypn
       if (yp1 .gt. .99d30) then
          y2(1) = 0.d0
          u(1) = 0.d0
@@ -99,51 +99,49 @@ contains
          sig = (x(i) - x(i - 1))/(x(i + 1) - x(i - 1))
          p = sig*y2(i - 1) + 2.d0
          y2(i) = (sig - 1.d0)/p
-         u(i) = (6.d0*((y(i + 1) - y(i))/(x(i + 1) &
-                                          - x(i)) - (y(i) - y(i - 1))/(x(i) - x(i - 1)))/(x(i + 1) - x(i - 1)) - sig* &
-                 u(i - 1))/p
-11       continue
-         if (ypn .gt. .99d30) then
-            qn = 0.d0
-            un = 0.d0
-         else
-            qn = 0.5d0
-            un = (3.d0/(x(n) - x(n - 1)))*(ypn - (y(n) - y(n - 1))/(x(n) - x(n - 1)))
-         end if
-         y2(n) = (un - qn*u(n - 1))/(qn*y2(n - 1) + 1.d0)
-         do 12 k = n - 1, 1, -1
-            y2(k) = y2(k)*y2(k + 1) + u(k)
-12          continue
-            return
-            END SUBROUTINE
+         u(i) = (6.d0*((y(i + 1) - y(i))/(x(i + 1)- x(i)) &
+          - (y(i) - y(i - 1))/(x(i) - x(i - 1)))/(x(i + 1)- x(i - 1))&
+          - sig* u(i - 1))/p
+11    continue
+      if (ypn .gt. .99d30) then
+         qn = 0.d0
+         un = 0.d0
+      else
+         qn = 0.5d0
+         un = (3.d0/(x(n) - x(n - 1)))*(ypn - (y(n) - y(n - 1))/(x(n) - x(n - 1)))
+      end if
+      y2(n) = (un - qn*u(n - 1))/(qn*y2(n - 1) + 1.d0)
+      do 12 k = n - 1, 1, -1
+         y2(k) = y2(k)*y2(k + 1) + u(k)
+12    continue
+      return
+   END SUBROUTINE
 !
-            SUBROUTINE splint(xa, ya, y2a, n, x, y)
-               !Numerical recipes fortran 77 - originally by William H. Press
-               !https://github.com/wangvei/nrf77/blob/master/splint.f - Jon Lighthall
-               INTEGER n
-               DOUBLE PRECISION x, y, xa(n), y2a(n), ya(n)
-               INTEGER k, khi, klo
-               DOUBLE PRECISION a, b, h
-               klo = 1
-               khi = n
-1              if (khi - klo .gt. 1) then
-                  k = (khi + klo)/2
-                  if (xa(k) .gt. x) then
-                     khi = k
-                  else
-                     klo = k
-                  end if
-                  goto 1
-               end if
-               h = xa(khi) - xa(klo)
+   SUBROUTINE splint(xa, ya, y2a, n, x, y)
+      !Numerical recipes fortran 77 - originally by William H. Press
+      !https://github.com/wangvei/nrf77/blob/master/splint.f - Jon Lighthall
+      INTEGER n
+      DOUBLE PRECISION x, y, xa(n), y2a(n), ya(n)
+      INTEGER k, khi, klo
+      DOUBLE PRECISION a, b, h
+      klo = 1
+      khi = n
+1     if (khi - klo .gt. 1) then
+         k = (khi + klo)/2
+         if (xa(k) .gt. x) then
+            khi = k
+         else
+            klo = k
+         end if
+         goto 1
+      end if
+      h = xa(khi) - xa(klo)
 !    if (h.eq.0.d0) print *, ' bad xa input in splint'
-               if (abs(h) .lt. 1d-30) print *, ' bad xa input in splint' !lpm compiler warning fix.
-
-               a = (xa(khi) - x)/h
-               b = (x - xa(klo))/h
-               y = a*ya(klo) + b*ya(khi) + ((a**3 - a)*y2a(klo) + (b**3 - b)*y2a(khi))* &
-                   (h**2)/6.d0
-               return
-            END SUBROUTINE
+      if (abs(h) .lt. 1d-30) print *, ' bad xa input in splint' !lpm compiler warning fix.
+      a = (xa(khi) - x)/h
+      b = (x - xa(klo))/h
+      y = a*ya(klo) + b*ya(khi) + ((a**3 - a)*y2a(klo) + (b**3 - b)*y2a(khi))* (h**2)/6.d0           
+      return
+   END SUBROUTINE
 
 end module interpolation_module

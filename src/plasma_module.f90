@@ -5,7 +5,7 @@ module plasma_module
    implicit none
    real(f64) :: eV_to_erg = 1.602176634e-12_f64
 contains
-   subroutine calculate_pec_plt(nlev, pops, ntran, avals, sob, pecs, plt, density, energy)
+   subroutine calculate_pec_plt(nlev, pops, ntran, avals, sob, pecs, plt, density, energy,useSob)
       integer, intent(in)  :: nlev, ntran
       real(f64), intent(in)  :: pops(nlev)
       real(f64), intent(in)  :: energy(nlev)
@@ -17,6 +17,9 @@ contains
       real(f64)             :: density
       real(f64)             :: ei, ej
       integer               :: ii, jj, pp
+      logical, intent(in), optional :: useSob
+      logical :: useSobInternal = .true.
+      if (present(useSob))    useSobInternal = useSob
       !
       plt = 0.0_f64
       do ii = 1, nlev - 1
@@ -24,11 +27,14 @@ contains
          do jj = ii + 1, nlev
             ej = energy(jj)
             pp = upperTriangleIndexing(ii, jj, nlev)
-            pecs(pp) = pops(jj)*avals(pp)*sob(pp)/density
+            pecs(pp) = pops(jj)*avals(pp)/density
+            if (useSobInternal) pecs(pp) = pecs(pp) * sob(pp)
             plt = plt + pecs(pp)*(ej - ei)
             !print*,pecs(pp),pops(jj),density
          end do
       end do
+
+
       !
       plt = plt*eV_to_erg
       !

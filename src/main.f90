@@ -13,25 +13,24 @@ program mycrm
    call alloc
 
    print *, mode
-   if (mode .eq. 'astro') then
 
-      shellVelocityOuterC = velocityExpansionC
-      shellVelocityInnerC = 0.0_f64
-      call getAtomicDensityLocal
+   select case (trim(mode))
+      case ('astro')
 
-      call colrad
-
-   else if (mode .eq. 'levelscan') then
-      call levelscan
-   else if (mode .eq. 'masscontour') then
-      call masscontour
-   else if (mode .eq. 'lineplot') then
-      call lineplot
-   else if (mode .eq. 'onion') then
-      call onion
-   else
-      print *, ' Bad calculation mode requested. Check input. '
-   end if
+         call colrad
+      case ('levelscan')
+         call levelscan
+      case('tempdensscan')
+         call tempDensScan
+      case ('masscontour')
+         call masscontour
+      case ('lineplot')
+         call lineplot
+      case ('onion')
+         call onion
+      case default
+         print *, ' Bad calculation mode requested. Check input. '
+   end select
 
    close (6)
    call dealloc

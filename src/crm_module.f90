@@ -109,24 +109,33 @@ contains
 
    end subroutine
 
-   subroutine     build_crm(nlev, density, Q)
+   subroutine     build_crm(nlev, density, Q, useSob)
       implicit none
       integer,   intent(in)    :: nlev
       real(f64)                :: density
       real(f64), intent(inout) :: Q(nlev, nlev)
       integer :: ii,jj,kk
-
+      logical :: useSobInternal = .true.
+      logical, intent(in), optional :: useSob
+      if (present(useSob))    useSobInternal = useSob
       Q(:,:)  = density * qmatrix(:,:)
       kk=1
-      do ii = 1, nlev-1
-         do jj = ii+1, nlev
-            !jj > ii 
-            !Q(jj,ii) =  Q(jj,ii) + density * qmatrix(jj,ii)
-            !Q(ii,jj) =  Q(ii,jj) + density * qmatrix(ii,jj) + aval(kk) * sob(kk)
-            Q(ii,jj) =  Q(ii,jj) + aval(kk) * sob(kk)
-            kk = kk + 1
-         end do 
-      end do
+      !write(0,*) useSobInternal
+      if (useSobInternal) then 
+         do ii = 1, nlev-1
+            do jj = ii+1, nlev
+               Q(ii,jj) =  Q(ii,jj) + aval(kk) * sob(kk)
+               kk = kk + 1
+            end do 
+         end do
+      else 
+         do ii = 1, nlev-1
+            do jj = ii+1, nlev
+               Q(ii,jj) =  Q(ii,jj) + aval(kk)
+               kk = kk + 1
+            end do 
+         end do
+      end if 
 !
       !enforce loss conservation...
       do jj = 1, nlev
@@ -135,7 +144,7 @@ contains
 
    end subroutine build_crm
 
-   subroutine solve_cr_with_continuity(nlev, density, Q, pops, ierr,skipbuild,ninclude)
+   subroutine solve_cr_with_continuity(nlev, density, Q, pops, ierr,skipbuild,ninclude,useSob)
       implicit none
       integer,   intent(in)    :: nlev
       real(f64)                :: density
@@ -143,15 +152,17 @@ contains
       real(f64), intent(out)   :: pops(nlev)
       
       integer, intent(in), optional :: skipbuild, ninclude
-      integer :: skipbuildinternal = 0, nincludeInternal 
+      logical, intent(in), optional :: useSob
+      logical :: useSobInternal = .true.
+      integer :: skipbuildinternal = 0, nincludeInternal
       integer, intent(out) :: ierr
       
 
       !if the CRM for this case has already been built, for some reason.
       if (present(skipbuild)) skipbuildinternal = skipbuild
-
+      if (present(useSob))    useSobInternal = useSob
       if (skipbuildinternal == 0) then 
-         call build_crm(nlev, density, Q)
+         call build_crm(nlev, density, Q, useSob=useSobInternal)
       end if 
       ! replace first row with continuity
       !this is easier to maintain than the old version.
@@ -216,6 +227,7 @@ contains
             tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
             
             if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64 - exp(-tau))/tau
+            !write(0,*) sob(pp)
             !if tau is negative - ignore for now...
             !it's usually due to numerical instablility of the CRM inversion as opposed to physical lasers...
             if ((tau < 0.0_f64)) write (999, *) ii, pops(ii), jj, pops(jj), baseAvals(pp), tau
