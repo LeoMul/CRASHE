@@ -14,10 +14,11 @@ module crm_module
    use constants_module
    use Periodic_Table
    use readadf04_module, only: upperTriangleIndexing
-   use atomicdata_module,only :qmatrix, aval,sob, numLevels
+   use atomicdata_module
    implicit none
    integer, allocatable   :: ipiv(:)
    real(f64) :: latime
+
 
 contains
    subroutine deallocipiv
@@ -211,6 +212,34 @@ contains
    end subroutine
 
    subroutine sobolev_escape(nlev, ntran, baseAvals, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)
+      implicit none
+      integer :: nlev, ntran
+      real(f64) :: pops(nlev), weights(nlev)
+      real(f64) :: baseAvals(ntran), wl_cm_cubed(ntran)
+      real(f64) :: atomicDensityLocal, time_exp_days
+      real(f64) :: tau, pref, pw(nlev)
+      integer :: pp, ii, jj
+
+      pref = sobconst*atomicDensityLocal*time_exp_days*86400.0_f64
+      pw   = pops/weights
+      sob(:) = 1.0_f64
+      sob_tau(:) = 0.0_f64
+      sob_weight(:) = 0.0_f64
+      n_neg_tau = 0
+
+      do ii = 1, nlev - 1
+         do jj = ii + 1, nlev
+            pp  = upperTriangleIndexing(ii, jj, nlev)
+            tau = pref*baseAvals(pp)*wl_cm_cubed(pp)*weights(jj)*(pw(ii) - pw(jj))
+            sob_tau(pp)    = tau
+            sob_weight(pp) = baseAvals(pp)*pops(jj)          ! photon rate A*n_upper
+            if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64-exp(-tau))/tau
+            if (tau < 0.0_f64) n_neg_tau = n_neg_tau + 1     ! ignored, as before
+         end do
+      end do
+   end subroutine sobolev_escape
+
+   subroutine sobolev_escapeold(nlev, ntran, baseAvals, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)
       !calculates Sobolev escape probability.
       implicit none
       integer :: nlev, ntran
@@ -233,7 +262,7 @@ contains
       do ii = 1, nlev - 1
          do jj = ii + 1, nlev
             pp = upperTriangleIndexing(ii, jj, nlev)
-            write(0,*) pp
+            !write(0,*) pp
             tau = sobconst * baseAvals(pp) * wl_cm_cubed(pp) * weights(jj) * atomicDensityLocal * time_exp_sec * (pops(ii)/weights(ii) -  pops(jj)/weights(jj))
             
             if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64 - exp(-tau))/tau

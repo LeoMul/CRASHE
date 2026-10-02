@@ -37,7 +37,8 @@ module colradfort
    real(f64)              :: t1, t2
    character(len=300)     :: broadmodedefault = 'gaussian'
    integer*8              :: shellnumtemp = 0
-
+   
+   real(f64), allocatable :: d_sob(:), d_sob_old(:)
    contains
 
    subroutine getadf04
@@ -266,12 +267,12 @@ module colradfort
       write(50,*) latime
    end subroutine
 
-
-   subroutine convergeSobolev(electron_density)
-
+   subroutine convergeSobolevold(electron_density)
       implicit none
       real(f64) :: electron_density      
       real(f64) :: sob_damp 
+      real(f64) :: avg 
+      converged = .false.
       sob_damp = sob_damp_initial
       call cpu_time(t1)
       popsnosob = col1
@@ -279,7 +280,7 @@ module colradfort
       pltnosob  = plt
 
       !write(0,*) 'initial approximation using  ',col1(1)
-
+      write(0,*) '----------------------------------------------------'
       call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
                            statweight, wl_cm_cubed, atomicDensity)
 
@@ -290,7 +291,8 @@ module colradfort
          !write(0,*) maxval(col1 - popsnosob)
 
          sob_old = sob
-
+         avg = sum(sob) / ntran
+         write(0,'(ES12.5)') avg
          call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
                               statweight, wl_cm_cubed, atomicDensity)
 
@@ -336,9 +338,107 @@ module colradfort
          write (*, '(A,I4,A,I3,A,2ES10.2)') &
             'WARNING: Sobolev did not converge for temp index ', i, &
             ' after ', max_sob_iter, ' iterations', beta_change, beta_change_old
+         write(0,*) 'didnt converge'
       end if
 
    end subroutine
+
+
+   subroutine convergeSobolev(electron_density)
+      implicit none
+      real(f64) :: electron_density
+
+      real(f64), parameter :: d_init    = 1.0_f64      ! start undamped; use 0.7 if iteration 1-2 overshoot
+      real(f64), parameter :: d_min     = 2.0e-3_f64
+      real(f64), parameter :: shrink    = 0.3_f64      ! d -> shrink*d when a line's residual flips sign
+      real(f64), parameter :: grow      = 1.1_f64      ! slow recovery otherwise
+      real(f64), parameter :: pop_floor = 1.0e-10_f64
+      logical,   parameter :: warm_damp = .true.       ! carry learned damping to the next grid point
+      logical,   parameter :: debug_sob = .true.
+
+      real(f64), allocatable, save :: d_keep(:)
+      real(f64), allocatable :: x(:), f(:), fprev(:), d(:), col_old(:), dpop(:)
+      logical,   allocatable :: lev_mask(:)
+      real(f64) :: pop_change
+      integer   :: ilev
+
+      allocate (x(ntran), f(ntran), fprev(ntran), d(ntran))
+      allocate (col_old(size(col1)), dpop(size(col1)), lev_mask(size(col1)))
+
+      if (warm_damp .and. allocated(d_keep)) then
+         d = min(1.0_f64, 4.0_f64*d_keep)       ! stiff lines stay cautious, others recover fast
+      else
+         d = d_init
+      end if
+      fprev      = 0.0_f64
+      converged  = .false.
+      pop_change = huge(1.0_f64)
+
+      call cpu_time(t1)
+      popsnosob = col1
+      pecnosob  = pec
+      pltnosob  = plt
+
+      call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                          statweight, wl_cm_cubed, atomicDensity)
+      x = log(sob)                               ! iterate on x = ln(beta)
+
+      sob_iter_loop: do sob_iter = 1, max_sob_iter
+
+         sob = exp(x)                            ! beta used in this solve
+         col_old = col1
+         call solve_cr_with_continuity(numLevels, electron_density, crm, col1, ierr, useSob=.true.)
+
+         lev_mask   = col1 > pop_floor*maxval(col1)
+         dpop       = abs(col1 - col_old)/max(col1, tiny(1.0_f64))
+         pop_change = maxval(dpop, lev_mask)
+
+         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                             statweight, wl_cm_cubed, atomicDensity)      ! sob <- G(x)
+         f = log(sob) - x                                                 ! undamped residual in ln(beta)
+
+         if (debug_sob) then
+            ilev = maxloc(dpop, 1, lev_mask)
+            write (0, '(A,I4,A,ES10.3,A,I6,A,I7,A,ES9.2)') ' it=', sob_iter, ' dpop=', pop_change, &
+               ' (lev ', ilev, ')  n(d<0.5)=', count(d < 0.5_f64), '  dmin=', minval(d)
+         end if
+
+         if (sob_iter > 1 .and. pop_change < sob_tol) then
+            converged = .true.
+            sob = exp(x)                         ! consistent with the col1 just solved
+            write (*, '(A,I4)')     ' [sobolev] converged at iter   :', sob_iter
+            write (*, '(A,ES10.4)') '        with maximum dPop/Pop   : ', pop_change
+            exit sob_iter_loop
+         end if
+
+         if (sob_iter > 1) then
+            where (f*fprev < 0.0_f64)
+               d = max(d_min, shrink*d)
+            elsewhere
+               d = min(1.0_f64, grow*d)
+            end where
+         end if
+
+         fprev = f
+         x = min(x + d*f, 0.0_f64)               ! beta <= 1
+
+      end do sob_iter_loop
+
+      if (warm_damp) then
+         if (.not. allocated(d_keep)) allocate (d_keep(ntran))
+         d_keep = d
+      end if
+
+      call cpu_time(t2)
+      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
+      if (.not. converged) then
+         write (*, '(A,I4,A,I3,A,ES10.2)') &
+            'WARNING: Sobolev did not converge for temp index ', i, &
+            ' after ', max_sob_iter, ' iterations; dPop:', pop_change
+      end if
+
+      deallocate (x, f, fprev, d, col_old, dpop, lev_mask)
+   end subroutine convergeSobolev
 
    subroutine levelscan()
       implicit none 
@@ -588,6 +688,8 @@ module colradfort
       allocate (upsInterp(ntran))
       allocate (pec(ntran))
       allocate (sob(ntran))
+      allocate(sob_tau(ntran))
+      allocate(sob_weight(ntran))
       allocate (sob_old(ntran))
       allocate (pecnosob(ntran))
       allocate (popcoronal(numlevels))

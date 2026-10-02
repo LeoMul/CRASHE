@@ -6,7 +6,7 @@ module plasma_module
    real(f64) :: eV_to_erg = 1.602176634e-12_f64
 contains
    subroutine calculate_pec_plt(nlev, pops, ntran, avals, sob, pecs, plt, density, energy,useSob)
-      integer, intent(in)  :: nlev, ntran
+      integer,   intent(in)  :: nlev, ntran
       real(f64), intent(in)  :: pops(nlev)
       real(f64), intent(in)  :: energy(nlev)
       real(f64), intent(in)  :: avals(ntran)

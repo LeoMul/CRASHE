@@ -23,9 +23,9 @@ module atomicdata_module
    real(f64), allocatable :: sob(:)             ! Effective transition probabilities
    real(f64), allocatable :: wl_cm(:)           ! transition wavelengths (cm), per transition
    real(f64), allocatable :: wl_cm_cubed(:)     ! wl_cm**3, per transition
-   real(f64), allocatable :: qmatrix(:,:)       ! transition rate q(jj,ii) = i to j (cm3 s-1) 
-
-
+   real(f64), allocatable :: qmatrix(:,:)       ! transition rate q(jj,ii) = i to j (cm3 s-1)
+   real(f64), allocatable :: sob_tau(:),sob_weight(:)
+   integer :: n_neg_tau 
 contains
 
    subroutine allocsob
