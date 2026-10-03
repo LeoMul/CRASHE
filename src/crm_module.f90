@@ -211,6 +211,21 @@ contains
 
    end subroutine
 
+   subroutine prepare_sobfactors(atomicDensityLocal, time_exp_days)
+      use atomicdata_module
+      implicit none 
+      real(f64) :: pref, atomicDensityLocal, time_exp_days
+      integer :: ii ,jj,pp 
+      pref = sobconst*atomicDensityLocal*time_exp_days*86400.0_f64
+      pp = 1
+      do ii = 1, numLevels-1
+         do jj = ii+1,numLevels 
+            sobcoefficient(pp) = pref*aval(pp)*wl_cm_cubed(pp)*statweight(jj)
+            pp = pp + 1
+         end do 
+      end do 
+   end subroutine
+
    subroutine sobolev_escape(nlev, ntran, baseAvals, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)
       implicit none
       integer :: nlev, ntran
@@ -230,13 +245,27 @@ contains
       do ii = 1, nlev - 1
          do jj = ii + 1, nlev
             pp  = upperTriangleIndexing(ii, jj, nlev)
-            tau = pref*baseAvals(pp)*wl_cm_cubed(pp)*weights(jj)*(pw(ii) - pw(jj))
+            !tau = pref*baseAvals(pp)*wl_cm_cubed(pp)*weights(jj)*(pw(ii) - pw(jj))
+            tau  = sobcoefficient(pp) *( pw(ii) - pw(jj))
             sob_tau(pp)    = tau
             sob_weight(pp) = baseAvals(pp)*pops(jj)          ! photon rate A*n_upper
-            if (tau > 1.0e-5_f64) sob(pp) = (1.0_f64-exp(-tau))/tau
+            if (tau > 1.0e-5_f64) sob(pp) = betaoftau(tau)
             if (tau < 0.0_f64) n_neg_tau = n_neg_tau + 1     ! ignored, as before
          end do
       end do
+
+      contains 
+
+      function betaoftau(mytau)
+         implicit none 
+         real(f64) :: mytau, betaoftau 
+         
+         betaoftau = 1.0_f64 / mytau 
+         if (mytau < 4.0_f64) then 
+            betaoftau = betaoftau * (1.0_f64 - exp(-mytau))
+         end if
+      end function
+
    end subroutine sobolev_escape
 
    subroutine sobolev_escapeold(nlev, ntran, baseAvals, time_exp_days, pops, weights, wl_cm_cubed, atomicDensityLocal)

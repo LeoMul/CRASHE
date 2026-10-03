@@ -39,6 +39,7 @@ module colradfort
    integer*8              :: shellnumtemp = 0
    
    real(f64), allocatable :: d_sob(:), d_sob_old(:)
+   integer                :: densindex
    contains
 
    subroutine getadf04
@@ -119,7 +120,7 @@ module colradfort
       shellVelocityOuterC = velocityExpansionC
       shellVelocityInnerC = 0.0_f64
       call getAtomicDensityLocal
-
+      call prepare_sobfactors(atomicDensity, timeSinceExplosionDays)
       if (.not. allocated(wavelengthforspectrum) .or. .not. allocated(broadspec)) then
          stop 'colrad: spectrum arrays not allocated - call alloc(numwl) first'
       end if
@@ -238,6 +239,7 @@ module colradfort
       shellVelocityOuterC = velocityExpansionC
       shellVelocityInnerC = 0.0_f64
       call getAtomicDensityLocal
+      call prepare_sobfactors(atomicDensity, timeSinceExplosionDays)
       tempGrid(:) = (/(i * 1000       , i=1, 3, 1)/)
       densGrid(:) = (/(10.0_f64 ** (real(i)/real(10))  , i=1,100, 1)/)
       sob_old   = 1.0_f64
@@ -247,101 +249,25 @@ module colradfort
 
       do i = 1, size(tempGrid)
          call interpolate_upsilons_calc_rates(tempGrid(i))
-         do j = 1, size(densGrid)
+         do densindex = 1, size(densGrid)
             !
-            call solve_cr_with_continuity(numLevels,densGrid(j), crm, col1, ierr,useSob=.false.)
-            if ( (i == 1) .and. (j==1)) popswithsob = col1 
-            call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.false.)
-            !col1 = popswithsob
+            call solve_cr_with_continuity(numLevels,densGrid(densindex), crm, col1, ierr,useSob=.false.)
+            if ( (i == 1) .and. (densindex==1)) popswithsob = col1 
+            call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(densindex), energies,useSob=.false.)
+            col1 = popswithsob
             if (sobolev) then 
-               !call BoltzmanPopulation(numLevels,statweight,energies, tempGrid(i),col1)
-               call convergeSobolev(densGrid(j))
-               call newtonSobolev(densGrid(j))
-               call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(j), energies,useSob=.true.)
-               !popswithsob = col1 
+!               call BoltzmanPopulation(numLevels,statweight,energies, tempGrid(i),col1)
+               call convergeSobolev(densGrid(densindex))
+               !call newtonSobolev(densGrid(densindex))
+               call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(densindex), energies,useSob=.true.)
+               popswithsob = col1 
             end if 
-            write(50,'(2ES10.3, I4)') pltnosob,plt,sob_iter
+            write(50,'(2ES10.3, I4)')  pltnosob,plt,sob_iter
          end do       
       end do
       call cpu_time(t2)
-      write(50,*) t2-t1
-      write(50,*) latime
-   end subroutine
-
-   subroutine convergeSobolevold(electron_density)
-      implicit none
-      real(f64) :: electron_density      
-      real(f64) :: sob_damp 
-      real(f64) :: avg 
-      converged = .false.
-      sob_damp = sob_damp_initial
-      call cpu_time(t1)
-      popsnosob = col1
-      pecnosob  = pec
-      pltnosob  = plt
-
-      !write(0,*) 'initial approximation using  ',col1(1)
-      write(0,*) '----------------------------------------------------'
-      call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
-                           statweight, wl_cm_cubed, atomicDensity)
-
-      sob_iter_loop: do sob_iter = 1, max_sob_iter
-
-         call solve_cr_with_continuity(numLevels,electron_density, crm, col1, ierr,useSob=.true.)
-
-         !write(0,*) maxval(col1 - popsnosob)
-
-         sob_old = sob
-         avg = sum(sob) / ntran
-         write(0,'(ES12.5)') avg
-         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
-                              statweight, wl_cm_cubed, atomicDensity)
-
-         sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
-
-         !this is a fairly conservative convergence criterion - basically it asserts that
-         !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
-         beta_change = maxval(abs(sob - sob_old)/sob)
-         !write(0,*) beta_change
-         if (sob_iter > 1 .and. beta_change < sob_tol) then
-            converged = .true.
-            write (*, '(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
-            write (*, '(A,ES10.4)') '        with maximum dBeta/Beta : ', beta_change
-            exit sob_iter_loop
-         end if
-
-         !if (sob_iter > 1) then
-         !   if (beta_change > beta_change_old) then
-         !   ! Oscillating or diverging: reduce step size
-         !      sob_damp = max(0.05_f64, sob_damp * 0.5_f64)
-         !   else if (beta_change < 0.8_f64 * beta_change_old) then
-         !! Monotonically converging well: gradually restore step size
-         !      sob_damp = min(sob_damp_initial, sob_damp * 1.05_f64)
-         !   end if
-         !end if
-
-
-         beta_change_old = beta_change
-
-         if (mod(sob_iter,10) == 0) then 
-            sob_damp = sob_damp * 0.5_f64
-            !sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
-         end if
-
-      end do sob_iter_loop
-
-      !write(0,*) 'converged approximation using',col1(1)
-      !write(0,*) '-----------------------------------------------------'
-
-      call cpu_time(t2)
-      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
-      if (.not. converged) then
-         write (*, '(A,I4,A,I3,A,2ES10.2)') &
-            'WARNING: Sobolev did not converge for temp index ', i, &
-            ' after ', max_sob_iter, ' iterations', beta_change, beta_change_old
-         write(0,*) 'didnt converge'
-      end if
-
+      write(50,*) '#',t2-t1
+      write(50,*) '#',latime
    end subroutine
 
    subroutine newtonSobolev(electron_density)
@@ -355,8 +281,8 @@ module colradfort
       logical,   parameter :: use_continuation = .false. ! tau-scaling 0.01 -> 0.1 -> 1 (try if it stalls)
       logical,   parameter :: fallback   = .true.        ! on failure, run the damped convergeSobolev
       logical,   parameter :: check_jac  = .false.       ! one-off finite-difference test of J
-      logical,   parameter :: verify     = .true.        ! one Picard solve at the end as a consistency check
-      logical,   parameter :: debug_sob  = .true.
+      logical,   parameter :: verify     = .false.        ! one Picard solve at the end as a consistency check
+      logical,   parameter :: debug_sob  = .false.
 
       real(f64), allocatable :: n(:), nt(:), dn(:), F(:), Ft(:), fscale(:), Q(:,:), J(:,:), chk(:)
       integer,   allocatable :: ipiv(:)
@@ -452,7 +378,7 @@ module colradfort
       sob_iter = ntot
 
       if (.not. converged .and. fallback) then
-         write (*, '(A,I4)') ' [newton] failed; falling back to damped iteration, temp index ', i
+         write (0, '(A,I4,A,I4)') ' [newton] failed; falling back to damped iteration, temp index ', i,' dens index',densindex
          col1 = popsnosob
          call convergeSobolev(electron_density)
          return
@@ -575,7 +501,7 @@ module colradfort
       real(f64), parameter :: res_factor = 10.0_f64
       logical,   parameter :: warm_start  = .true.     ! start from the previous grid point's beta
       logical,   parameter :: require_res = .false.    ! also demand the masked undamped residual be small
-      logical,   parameter :: debug_sob   = .true.
+      logical,   parameter :: debug_sob   = .false.
 
       real(f64), allocatable, save :: x_keep(:), cap_keep(:)
       real(f64), allocatable :: x(:), f(:), fprev(:), d(:), dcap(:), eff(:), col_old(:), dpop(:)
@@ -921,7 +847,81 @@ module colradfort
       reqmass = num_req/num_in_one_solar_mass
 
    end subroutine
+   subroutine convergeSobolevold(electron_density)
+      implicit none
+      real(f64) :: electron_density      
+      real(f64) :: sob_damp 
+      real(f64) :: avg 
+      converged = .false.
+      sob_damp = sob_damp_initial
+      call cpu_time(t1)
+      popsnosob = col1
+      pecnosob  = pec
+      pltnosob  = plt
 
+      !write(0,*) 'initial approximation using  ',col1(1)
+      !write(0,*) '----------------------------------------------------'
+      call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                           statweight, wl_cm_cubed, atomicDensity)
+
+      sob_iter_loop: do sob_iter = 1, max_sob_iter
+
+         call solve_cr_with_continuity(numLevels,electron_density, crm, col1, ierr,useSob=.true.)
+
+         !write(0,*) maxval(col1 - popsnosob)
+
+         sob_old = sob
+         avg = sum(sob) / ntran
+         !write(0,'(ES12.5)') avg
+         call sobolev_escape(numLevels, ntran, aval, timeSinceExplosionDays, col1, &
+                              statweight, wl_cm_cubed, atomicDensity)
+
+         sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
+
+         !this is a fairly conservative convergence criterion - basically it asserts that
+         !none of the beta's change by more than 0.1%, for sob_tol = 1e-3.
+         beta_change = maxval(abs(sob - sob_old)/sob)
+         !write(0,*) beta_change
+         if (sob_iter > 1 .and. beta_change < sob_tol) then
+            converged = .true.
+            write (*, '(A,I4,A,ES10.3)') ' [sobolev] converged at iter   :', sob_iter
+            write (*, '(A,ES10.4)') '        with maximum dBeta/Beta : ', beta_change
+            exit sob_iter_loop
+         end if
+
+         !if (sob_iter > 1) then
+         !   if (beta_change > beta_change_old) then
+         !   ! Oscillating or diverging: reduce step size
+         !      sob_damp = max(0.05_f64, sob_damp * 0.5_f64)
+         !   else if (beta_change < 0.8_f64 * beta_change_old) then
+         !! Monotonically converging well: gradually restore step size
+         !      sob_damp = min(sob_damp_initial, sob_damp * 1.05_f64)
+         !   end if
+         !end if
+
+
+         beta_change_old = beta_change
+
+         if (mod(sob_iter,10) == 0) then 
+            sob_damp = sob_damp * 0.5_f64
+            !sob = sob_damp*sob + (1.0_f64 - sob_damp) * sob_old
+         end if
+
+      end do sob_iter_loop
+
+      !write(0,*) 'converged approximation using',col1(1)
+      !write(0,*) '-----------------------------------------------------'
+
+      call cpu_time(t2)
+      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
+      if (.not. converged) then
+         write (*, '(A,I4,A,I3,A,2ES10.2)') &
+            'WARNING: Sobolev did not converge for temp index ', i, &
+            ' after ', max_sob_iter, ' iterations', beta_change, beta_change_old
+         write(0,*) 'didnt converge'
+      end if
+
+   end subroutine
    subroutine alloc
       implicit none
       numTempsReq = 1
@@ -932,8 +932,9 @@ module colradfort
       allocate (upsInterp(ntran))
       allocate (pec(ntran))
       allocate (sob(ntran))
-      allocate(sob_tau(ntran))
-      allocate(sob_weight(ntran))
+      allocate (sobcoefficient(ntran))
+      allocate (sob_tau(ntran))
+      allocate (sob_weight(ntran))
       allocate (sob_old(ntran))
       allocate (pecnosob(ntran))
       allocate (popcoronal(numlevels))
