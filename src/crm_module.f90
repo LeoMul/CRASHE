@@ -149,6 +149,7 @@ contains
    end subroutine build_crm
 
    subroutine solve_cr_with_continuity(nlev, density, Q, pops, ierr,skipbuild,ninclude,useSob)
+      use omp_lib,only: omp_get_wtime
       implicit none
       integer,   intent(in)    :: nlev
       real(f64)                :: density
@@ -183,9 +184,11 @@ contains
       nincludeInternal = nlev
       if (present(ninclude)) nincludeInternal   = ninclude
 !
-      call cpu_time(t1)
+      !call cpu_time(t1)
+      t1 = omp_get_wtime()
       call dgesv(nincludeInternal, 1, Q, nlev, ipiv, pops, nlev, ierr)
-      call cpu_time(t2)
+      t2 = omp_get_wtime()
+      !call cpu_time(t2)
       latime = latime + t2 - t1
       !     
       if (ierr /= 0) stop 'error in dgesv'

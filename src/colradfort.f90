@@ -235,7 +235,8 @@ module colradfort
       real(f64) :: densGrid(100)
       real(f64),allocatable :: popswithsob(:)
       real(f64) :: t1,t2
-      call cpu_time(t1)
+      !call cpu_time(t1)
+      t1 = omp_get_wtime()
       shellVelocityOuterC = velocityExpansionC
       shellVelocityInnerC = 0.0_f64
       call getAtomicDensityLocal
@@ -265,7 +266,7 @@ module colradfort
             write(50,'(2ES10.3, I4)')  pltnosob,plt,sob_iter
          end do       
       end do
-      call cpu_time(t2)
+      t2 = omp_get_wtime()
       write(50,*) '#',t2-t1
       write(50,*) '#',latime
    end subroutine
