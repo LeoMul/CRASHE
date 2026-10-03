@@ -241,16 +241,18 @@ contains
       sob_tau(:) = 0.0_f64
       sob_weight(:) = 0.0_f64
       n_neg_tau = 0
-
+      pp = 1
       do ii = 1, nlev - 1
          do jj = ii + 1, nlev
-            pp  = upperTriangleIndexing(ii, jj, nlev)
+            !pp  = upperTriangleIndexing(ii, jj, nlev)
             !tau = pref*baseAvals(pp)*wl_cm_cubed(pp)*weights(jj)*(pw(ii) - pw(jj))
             tau  = sobcoefficient(pp) *( pw(ii) - pw(jj))
             sob_tau(pp)    = tau
             sob_weight(pp) = baseAvals(pp)*pops(jj)          ! photon rate A*n_upper
             if (tau > 1.0e-5_f64) sob(pp) = betaoftau(tau)
             if (tau < 0.0_f64) n_neg_tau = n_neg_tau + 1     ! ignored, as before
+            pp = pp + 1
+
          end do
       end do
 
