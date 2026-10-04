@@ -408,8 +408,8 @@ module colradfort
          ! Builds Q exactly as build_crm does (with beta evaluated from x), then
          !   Fx = Q x with row 1 replaced by sum(x) - 1
          !   Jx = dFx/dx (only when wantJ; otherwise Jx is left untouched)
-         real(f64), intent(in)    :: x(:), tscale
-         real(f64), intent(inout) :: Fx(:), Jx(:,:)
+         real(f64), intent(in)    :: x(numLevels), tscale
+         real(f64), intent(inout) :: Fx(numLevels), Jx(numLevels,numLevels)
          logical,   intent(in)    :: wantJ
          real(f64) :: c, tau, beta, dbeta, em, w, ta0, ta1
          integer   :: ii, jj, kk
@@ -437,7 +437,7 @@ module colradfort
                   dbeta = 0.0_f64
                end if
                Q(ii,jj) = Q(ii,jj) + aval(kk)*beta
-               if (wantJ .and. dbeta /= 0.0_f64) then
+               if (wantJ .and. abs(dbeta) > 0.0_f64) then
                   w = aval(kk)*x(jj)*dbeta*c       ! A * n_u * dbeta/dtau * c
                   Jx(ii,ii) = Jx(ii,ii) + w/statweight(ii)
                   Jx(ii,jj) = Jx(ii,jj) - w/statweight(jj)
@@ -470,7 +470,7 @@ module colradfort
       end subroutine assemble
 
       subroutine jac_check(x, tscale)
-         real(f64), intent(in) :: x(:), tscale
+         real(f64), intent(in) :: x(numLevels), tscale
          real(f64), allocatable :: F0(:), F1(:), xp(:), Jfd(:)
          real(f64) :: h
          integer   :: k
@@ -510,6 +510,7 @@ module colradfort
       real(f64) :: pop_change, res, f_floor
       integer   :: ilev
       logical   :: warm, conv
+      logical   :: aggressiveStart 
 
       allocate (x(ntran), f(ntran), fprev(ntran), d(ntran), dcap(ntran), eff(ntran), flip(ntran), tr_mask(ntran))
       allocate (col_old(size(col1)), dpop(size(col1)), lev_mask(size(col1)))
@@ -538,6 +539,21 @@ module colradfort
          x    = log(sob)
          dcap = 1.0_f64
       end if
+
+      !aggressiveStart = .true.
+      !if (aggressiveStart) then 
+      !   !tr_mask = aval > 1e3 
+      !   sob(:) = 1.0_f64
+      !   do sob_iter = 1,ntran 
+      !      if (aval(sob_iter) > 1e3 ) sob(sob_iter) = 1e-3
+      !   end do
+      !   x    = log(sob)
+      !   !write(0,*) 'aggressive start'
+      !   call solve_cr_with_continuity(numLevels, electron_density, crm, col1, ierr, useSob=.true.)
+      !   d = 1.0_f64
+      !end if 
+
+
       d = dcap
 
       sob_iter_loop: do sob_iter = 1, max_sob_iter
@@ -675,7 +691,6 @@ module colradfort
       call interpolate_upsilons_calc_rates(temperature)
       call getmassestimate(density, mass_req, num_req, &
                            thislumo_per_ion, &
-                           requiredLumo, &
                            num_in_one_solar_mass)
 
       write (90, '(A, ES14.6,A)') '# Central temp         = ', temperature, ' Kelvin'
@@ -715,7 +730,6 @@ module colradfort
             call interpolate_upsilons_calc_rates(temperaturevary(ii))
             call getmassestimate(density, mass_req,  num_req, &
                                  thislumo_per_ion, &
-                                 requiredLumo, &
                                  num_in_one_solar_mass)
             write (90, '(2ES14.6)') mass_req, temperaturevary(ii)
          end do
@@ -726,7 +740,6 @@ module colradfort
          do ii = 1, size(electronDensityLocalvary)
             call getmassestimate(electronDensityLocalvary(ii), mass_req, num_req, &
                                  thislumo_per_ion, &
-                                 requiredLumo, &
                                  num_in_one_solar_mass)
             write (90, '(2ES14.6)') mass_req, electronDensityLocalvary(ii)
          end do
@@ -754,7 +767,6 @@ module colradfort
                counterii = counterii + 1
              call getmassestimate(electronDensityLocalvary(ii), mass_req, num_req, &
                                     thislumo_per_ion, &
-                                    requiredLumo, &
                                     num_in_one_solar_mass)
                write (90, '(2I10,1ES14.6)') counterii, counterjj, mass_req
             end do
@@ -779,7 +791,7 @@ module colradfort
       integer :: ii, jj
       real(f64) :: xx
       ! deliberately local (shadow the input values): lineplot always runs with these off
-      logical :: careful_la = .false., writeoutrates = .false.
+!      logical :: careful_la = .false., writeoutrates = .false.
 
       num_in_one_solar_mass = 1.0*m_solar_grams/get_mass_grams(atomicnumber)
       sob = 1
@@ -814,7 +826,6 @@ module colradfort
          do ii = 1, size(electronDensityLocalvary)
             call getmassestimate(electronDensityLocalvary(ii), mass_req, num_req, &
                                  thislumo_per_ion, &
-                                 requiredLumo, &
                                  num_in_one_solar_mass)
             massdump(ii) = mass_req
          end do
@@ -829,13 +840,12 @@ module colradfort
       reqmass, &
       num_req, &
       thislumo_per_ion, &
-      requiredLumo, &
       num_in_one_solar_mass)
       use input, only: contourLower, contourUpper
       implicit none
-      real(f64) :: num_req, thislumo_per_ion, requiredLumo, num_in_one_solar_mass
-      real(f64) :: reqtemp, reqdens, reqmass
-      logical :: careful_la, writeoutrates
+      real(f64) :: num_req, thislumo_per_ion, num_in_one_solar_mass
+      real(f64) :: reqdens, reqmass
+ !     logical :: careful_la, writeoutrates
       integer :: pp
       call solve_cr_with_continuity(numLevels,reqdens, crm, col1, ierr)
       pp = upperTriangleIndexing(contourLower, contourUpper, numlevels)

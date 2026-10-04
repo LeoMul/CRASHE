@@ -351,7 +351,7 @@ contains
             !write(0,*) ups(:,pp)
 
             read (546456, '(2I5,1X,ES10.2,I2)') kk, ll, av, iallowed
-            if (iallowed == 1) call vanregemorter(ii, jj, energies, aval, wl_cm, statweight, temps, ups, numTemps, numLevels, pp)
+            if (iallowed == 1) call vanregemorter(ii, jj, pp)
             aval(pp) = av
             !write(0,*) aval(pp)
 
@@ -362,12 +362,12 @@ contains
 
    end subroutine
 
-   subroutine vanregemorter(ii, jj, energies, aval, wl_cm, statweight, temps, ups, numTemps, numLevels, pp)
+   subroutine vanregemorter(ii, jj, pp)
       !AI generated for quick tests and comparson with Floers. Needs to be reviewed.
       implicit none
-      integer, intent(in)    :: ii, jj, numTemps, numLevels, pp
-      real(f64), intent(in)   :: energies(:), aval(:), wl_cm(:), statweight(:), temps(:)
-      real(f64), intent(inout):: ups(:, :)
+      integer, intent(in)    :: ii, jj, pp
+!      real(f64), intent(in)   :: energies(:), aval(:), wl_cm(:), statweight(:), temps(:)
+!      real(f64), intent(inout):: ups(:, :)
 
       ! Constants (CGS)
       real(f64), parameter :: h = 6.62607015d-27  ! erg·s
@@ -378,7 +378,7 @@ contains
       real(f64), parameter :: Ry_erg = 2.17987d-11     ! 1 Ry in erg
       real(f64), parameter :: pi = 3.14159265358979d0
 
-      real(f64) :: dE_erg, f_osc, u, gbar, q_vr, sigma_vr
+      real(f64) :: dE_erg, f_osc, u, gbar
       real(f64) :: prefactor
       integer   :: kk
 
