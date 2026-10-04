@@ -48,7 +48,19 @@ else
 endif
 
 FFLAGS   := $(BASE_FFLAGS) $(MODE_FLAGS)
-LDFLAGS  := -llapack -lblas
+#LDFLAGS  := -framework Accelerate# -llapack -lblas
+
+UNAME_S := $(shell uname -s)
+
+ifeq ($(UNAME_S),Darwin)
+    # macOS: Link Apple Accelerate framework
+    # Adding -isysroot prevents the SDK error in Conda/gfortran environments
+    LDFLAGS := -isysroot $(shell xcrun --show-sdk-path) -framework Accelerate
+else
+    # Linux / HPC Cluster: Link standard BLAS and LAPACK
+    LDFLAGS := -llapack -lblas
+endif
+
 
 # --- Files -------------------------------------------------------------------
 TARGET   := $(BINDIR)/crashe$(SUFFIX)
