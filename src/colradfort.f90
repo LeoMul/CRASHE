@@ -40,6 +40,16 @@ module colradfort
    
    real(f64), allocatable :: d_sob(:), d_sob_old(:)
    integer                :: densindex
+   ! convergeSobolev warm-start state (one copy per thread)
+   real(f64), allocatable :: x_keep(:), cap_keep(:)
+   ! set .false. while the scan runs threaded so threads do not interleave log output
+   logical                :: verbose_sob = .true.
+   !
+   ! Working state read and written by every routine the threaded scan calls. Each thread gets its own copy.
+   ! The matching variables in crm_module (ipiv, latime) and atomicdata_module (sob, sobcoefficient, qmatrix,
+   ! sob_tau, sob_weight, n_neg_tau) carry the same directive in their own modules.
+   !$omp threadprivate(ierr, i, densindex, t1, t2, converged, sob_iter, atomicDensity)
+   !$omp threadprivate(crm, col1, pec, popsnosob, pecnosob, plt, pltnosob, x_keep, cap_keep)
    contains
 
    subroutine getadf04
@@ -229,46 +239,128 @@ module colradfort
 
    end subroutine
 
-   subroutine tempDensScan 
-      implicit none 
+   subroutine thread_workspace_alloc()
+      !
+      ! Per-thread working arrays. Called by the master before the scan and by every thread at the top of
+      ! the parallel region; the allocated() guards make repeat calls harmless.
+      implicit none
+      if (.not. allocated(crm))       allocate (crm(numLevels, numLevels))
+      if (.not. allocated(col1))      allocate (col1(numLevels))
+      if (.not. allocated(pec))       allocate (pec(ntran))
+      if (.not. allocated(pecnosob))  allocate (pecnosob(ntran))
+      if (.not. allocated(popsnosob)) allocate (popsnosob(numLevels))
+      call alloc_thread_state()       ! crm_module: ipiv, sob, sob_tau, sob_weight, sobcoefficient, qmatrix
+   end subroutine
+
+   subroutine tempDensScan
+      !
+      ! Temperature x density scan, threaded over tasks. A task is one temperature and `chunk` consecutive
+      ! densities. Inside a task each density warm-starts from the previous one; the first density of a task
+      ! starts cold. Which thread runs a task has no effect on its result, so the output does not depend on the
+      ! number of threads (it does depend on `chunk`, within sob_tol).
+      !
+      ! Output goes to unit 50 in the original (T, density) order once the parallel region has finished.
+      implicit none
+      integer,   parameter :: chunk = 10
+      ! .false. = atomicDensity is fixed for the whole scan (as before);
+      ! .true.  = with fractionOverride > 0, atomicDensity = fractionOverride*n_e at every scanned density
+      logical,   parameter :: scan_tracks_density = .false.
       real(f64) :: tempGrid( 3)
-      real(f64) :: densGrid(100)
-      real(f64),allocatable :: popswithsob(:)
-      real(f64) :: t1,t2
-      !call cpu_time(t1)
-      t1 = omp_get_wtime()
+      real(f64) :: densGrid(1000)
+      real(f64), allocatable :: qmat_T(:, :, :), popswithsob(:), results(:, :, :)
+      integer,   allocatable :: iters(:, :)
+      real(f64) :: wall0, wall1, latime_pre, latime_total, atomicDensity_in
+      integer   :: nTemp, nDens, nchunk, ntask, itask, iT, ic, lo, hi, dd, ii
+
+      wall0 = omp_get_wtime()
       shellVelocityOuterC = velocityExpansionC
       shellVelocityInnerC = 0.0_f64
       call getAtomicDensityLocal
       call prepare_sobfactors(atomicDensity, timeSinceExplosionDays)
-      tempGrid(:) = (/(i * 1000       , i=1, 3, 1)/)
-      densGrid(:) = (/(10.0_f64 ** (real(i)/real(10))  , i=1,100, 1)/)
-      sob_old   = 1.0_f64
-      sob       = 1.0_f64
+      tempGrid(:) = (/(ii * 1000       , ii=1, 3, 1)/)
+      densGrid(:) = (/(10.0_f64 ** (real(ii)/real(100))  , ii=1,1000, 1)/)
+      nTemp = size(tempGrid)
+      nDens = size(densGrid)
 
-      allocate(popswithsob(numLevels))
+      allocate (results(2, nDens, nTemp), iters(nDens, nTemp), qmat_T(numLevels, numLevels, nTemp))
+      results = 0.0_f64
+      iters   = 0
 
-      do i = 1, size(tempGrid)
-         call interpolate_upsilons_calc_rates(tempGrid(i))
-         do densindex = 1, size(densGrid)
-            !
-            call solve_cr_with_continuity(numLevels,densGrid(densindex), crm, col1, ierr,useSob=.false.)
-            if ( (i == 1) .and. (densindex==1)) popswithsob = col1 
-            call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(densindex), energies,useSob=.false.)
-            col1 = popswithsob
-            if (sobolev) then 
-!               call BoltzmanPopulation(numLevels,statweight,energies, tempGrid(i),col1)
-               call convergeSobolev(densGrid(densindex))
-               !call newtonSobolev(densGrid(densindex))
-               call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(densindex), energies,useSob=.true.)
-               popswithsob = col1 
-            end if 
-            write(50,'(2ES10.3, I4)')  pltnosob,plt,sob_iter
-         end do       
+      ! Rate matrix for every temperature, built once on the master thread. Threads copy qmat_T into their own
+      ! qmatrix, so interpolate_upsilons_calc_rates is never called from inside the parallel region.
+      call thread_workspace_alloc()
+      do iT = 1, nTemp
+         call interpolate_upsilons_calc_rates(tempGrid(iT))
+         qmat_T(:, :, iT) = qmatrix
       end do
-      t2 = omp_get_wtime()
-      write(50,*) '#',t2-t1
-      write(50,*) '#',latime
+
+      nchunk = (nDens + chunk - 1)/chunk
+      ntask  = nTemp*nchunk
+      latime_pre   = latime
+      latime_total = 0.0_f64
+      atomicDensity_in = atomicDensity
+      verbose_sob  = .false.
+
+      !$omp parallel default(shared) private(itask, iT, ic, lo, hi, dd, popswithsob) copyin(atomicDensity)
+      call thread_workspace_alloc()
+      allocate (popswithsob(numLevels))
+      latime = 0.0_f64
+      sob    = 1.0_f64
+      ! sobolev_escape takes tau from sobcoefficient, which prepare_sobfactors fills from atomicDensity
+      call prepare_sobfactors(atomicDensity, timeSinceExplosionDays)
+      !$omp do schedule(dynamic, 1)
+      do itask = 1, ntask
+         iT = (itask - 1)/nchunk + 1
+         ic = mod(itask - 1, nchunk) + 1
+         lo = (ic - 1)*chunk + 1
+         hi = min(nDens, ic*chunk)
+         i  = iT
+         qmatrix = qmat_T(:, :, iT)
+         do dd = lo, hi
+            densindex = dd
+            sob_iter  = 0
+            if (scan_tracks_density .and. fractionOverride > 0.0_f64) then
+               atomicDensity = fractionOverride*densGrid(dd)
+               call prepare_sobfactors(atomicDensity, timeSinceExplosionDays)
+            end if
+
+            ! no-Sobolev reference at this (T, n_e)
+            call solve_cr_with_continuity(numLevels, densGrid(dd), crm, col1, ierr, useSob=.false.)
+            if (dd == lo) popswithsob = col1
+            call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(dd), energies, useSob=.false.)
+            pltnosob = plt
+
+            if (sobolev) then
+               col1 = popswithsob                ! warm start from the previous density in this task
+               call convergeSobolev(densGrid(dd), warm_in=(dd > lo))
+               !call newtonSobolev(densGrid(dd))
+               call calculate_pec_plt(numLevels, col1, ntran, aval, sob, pec, plt, densGrid(dd), energies, useSob=.true.)
+               popswithsob = col1
+            end if
+
+            results(1, dd, iT) = pltnosob
+            results(2, dd, iT) = plt
+            iters(dd, iT)      = sob_iter
+         end do
+      end do
+      !$omp end do
+      !$omp critical
+      latime_total = latime_total + latime
+      !$omp end critical
+      !$omp end parallel
+
+      verbose_sob   = .true.
+      atomicDensity = atomicDensity_in
+      latime        = latime_pre
+
+      do iT = 1, nTemp
+         do dd = 1, nDens
+            write (50, '(2ES10.3, I4)') results(1, dd, iT), results(2, dd, iT), iters(dd, iT)
+         end do
+      end do
+      wall1 = omp_get_wtime()
+      write (50, *) '#', wall1 - wall0
+      write (50, *) '#', latime_pre + latime_total
    end subroutine
 
    subroutine newtonSobolev(electron_density)
@@ -488,9 +580,12 @@ module colradfort
 
    end subroutine newtonSobolev
 
-   subroutine convergeSobolev(electron_density)
+   subroutine convergeSobolev(electron_density, warm_in)
       implicit none
       real(f64) :: electron_density
+      ! warm_in = .true.: start from the beta left by the previous call on this thread (absent = cold start)
+      logical, intent(in), optional :: warm_in
+      real(f64) :: ts0, ts1
 
       real(f64), parameter :: d_min      = 2.0e-3_f64
       real(f64), parameter :: shrink     = 0.5_f64     ! d -> shrink*d on a non-decaying sign flip
@@ -504,7 +599,6 @@ module colradfort
       logical,   parameter :: require_res = .false.    ! also demand the masked undamped residual be small
       logical,   parameter :: debug_sob   = .false.
 
-      real(f64), allocatable, save :: x_keep(:), cap_keep(:)
       real(f64), allocatable :: x(:), f(:), fprev(:), d(:), dcap(:), eff(:), col_old(:), dpop(:)
       logical,   allocatable :: lev_mask(:), tr_mask(:), flip(:)
       real(f64) :: pop_change, res, f_floor
@@ -521,11 +615,12 @@ module colradfort
       pop_change = huge(1.0_f64)
       res        = huge(1.0_f64)
 
-      warm = warm_start .and. (i > 1)
+      warm = .false.
+      if (present(warm_in)) warm = warm_start .and. warm_in
       if (warm) warm = allocated(x_keep)
       if (warm) warm = (size(x_keep) == ntran)
 
-      call cpu_time(t1)
+      ts0 = omp_get_wtime()
       popsnosob = col1
       pecnosob  = pec
       pltnosob  = plt
@@ -587,8 +682,10 @@ module colradfort
          if (conv) then
             converged = .true.
             sob = exp(x)                         ! consistent with the col1 just solved
-            write (*, '(A,I4)')     ' [sobolev] converged at iter   :', sob_iter
-            write (*, '(A,ES10.4)') '        with maximum dPop/Pop   : ', pop_change
+            if (verbose_sob) then
+               write (*, '(A,I4)')     ' [sobolev] converged at iter   :', sob_iter
+               write (*, '(A,ES10.4)') '        with maximum dPop/Pop   : ', pop_change
+            end if
             exit sob_iter_loop
          end if
 
@@ -616,9 +713,9 @@ module colradfort
       x_keep   = x
       cap_keep = dcap
 
-      call cpu_time(t2)
-      write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', t2 - t1, ' s'
-      if (.not. converged) then
+      ts1 = omp_get_wtime()
+      if (verbose_sob) write (*, '(A,ES10.4,A)') '  [timing] Sobolev iteration        : ', ts1 - ts0, ' s'
+      if (.not. converged .and. verbose_sob) then
          write (*, '(A,I4,A,I3,A,2ES10.2)') &
             'WARNING: Sobolev did not converge for temp index ', i, &
             ' after ', max_sob_iter, ' iterations; dPop, res:', pop_change, res

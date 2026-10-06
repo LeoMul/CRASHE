@@ -27,6 +27,10 @@ module atomicdata_module
    real(f64), allocatable :: qmatrix(:,:)       ! transition rate q(jj,ii) = i to j (cm3 s-1)
    real(f64), allocatable :: sob_tau(:),sob_weight(:)
    integer :: n_neg_tau 
+   ! Working arrays that the temperature/density scan in colradfort writes from several threads:
+   ! every thread gets its own copy (allocated by alloc_thread_state in crm_module).
+   ! Everything else in this module is read-only during the scan and stays shared.
+   !$omp threadprivate(sob, sobcoefficient, qmatrix, sob_tau, sob_weight, n_neg_tau)
 contains
 
    subroutine allocsob

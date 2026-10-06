@@ -17,13 +17,29 @@ module crm_module
    use atomicdata_module
    implicit none
    integer, allocatable   :: ipiv(:)
-   real(f64) :: latime
+   real(f64) :: latime = 0.0_f64      ! accumulated LU time; was uninitialised
+   ! one copy per thread: the scan in colradfort runs threaded. The arrays declared in
+   ! atomicdata_module carry the same directive there.
+   !$omp threadprivate(ipiv, latime)
 
 
 contains
    subroutine deallocipiv
       implicit none
       if (allocated(ipiv)) deallocate(ipiv)
+   end subroutine
+
+   subroutine alloc_thread_state()
+      ! Per-thread copies of the working arrays used by build_crm, solve_cr_with_continuity,
+      ! prepare_sobfactors and sobolev_escape. Every thread calls this at the start of a parallel
+      ! region; the allocated() guards make repeat calls harmless (the master's copies already exist).
+      implicit none
+      if (.not. allocated(ipiv))           allocate (ipiv(numLevels))
+      if (.not. allocated(sob))            allocate (sob(ntran))
+      if (.not. allocated(sob_tau))        allocate (sob_tau(ntran))
+      if (.not. allocated(sob_weight))     allocate (sob_weight(ntran))
+      if (.not. allocated(sobcoefficient)) allocate (sobcoefficient(ntran))
+      if (.not. allocated(qmatrix))        allocate (qmatrix(numLevels, numLevels))
    end subroutine
 
    subroutine allocipiv 
